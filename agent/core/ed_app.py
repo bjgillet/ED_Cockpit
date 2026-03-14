@@ -50,6 +50,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from agent.core.action_handler import ActionHandler
 from agent.core.ed_process_watcher import EDProcessWatcher, EDWatcherState
 from agent.core.journal_reader import JournalReader
 from agent.core.status_reader import StatusReader
@@ -120,6 +121,17 @@ class EDApp:
 
         # ── Client registry ───────────────────────────────────────────────
         self._registry = ClientRegistry(self._config_dir / "clients.json")
+
+        # ── Action handler (key injection) ────────────────────────────────
+        self._action_handler = ActionHandler(config_dir=self._config_dir)
+        if self._action_handler.is_functional:
+            log.info("ActionHandler: using backend %s",
+                     self._action_handler.backend_name)
+        else:
+            log.warning("ActionHandler: no functional backend — key actions "
+                        "will be logged but not delivered to the game.")
+        # Write bindings.json on first run so the user can customise it
+        ActionHandler.write_default_bindings(self._config_dir)
 
         # ── Backend services ──────────────────────────────────────────────
         self.watcher = EDProcessWatcher(on_update=self._on_watcher_update)
@@ -327,8 +339,16 @@ class EDApp:
         """
         Called by WSServer when a verified ActionMessage arrives.
 
-        The ActionHandler is implemented in Phase 5.  This is the
-        connection point between the network layer and the OS key simulator.
+        Forwards the request to the ActionHandler which translates the
+        logical key name to a platform-level key injection.
         """
         log.info("Action from %s: %s(%s)", client_id, action, key)
-        # TODO — Phase 5: forward to ActionHandler
+        dispatched = self._action_handler.execute(action, key)
+        if not dispatched:
+            log.warning(
+                "Action not dispatched — client=%s action=%r key=%r "
+                "(backend=%s functional=%s)",
+                client_id, action, key,
+                self._action_handler.backend_name,
+                self._action_handler.is_functional,
+            )

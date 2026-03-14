@@ -113,7 +113,28 @@ ED_Assist/
 
 ```bash
 pip install -r requirements-agent.txt
-# psutil, websockets, cryptography
+# psutil, websockets, cryptography (always required)
+```
+
+**Key injection — Linux (install at least one):**
+
+```bash
+# Preferred — X11 / Wine / Proton with DISPLAY set:
+pip install python-xlib
+
+# Alternative — Wayland or headless (needs /dev/uinput access):
+pip install evdev
+sudo usermod -aG input $USER   # then log out and back in
+```
+
+**Key injection — Windows:**
+
+```bash
+# Preferred — DirectInput-compatible (required for ED):
+pip install pydirectinput
+
+# If pydirectinput is not installed, a zero-dependency ctypes fallback
+# using KEYEVENTF_SCANCODE is used automatically.
 ```
 
 **Client machine:**
@@ -161,6 +182,37 @@ python client/main.py
 
 The client connects, receives its role assignment, and opens the matching
 panels.
+
+---
+
+## Key bindings
+
+On first run the agent writes `~/.config/ed-assist/bindings.json` (Linux) or
+`%APPDATA%\ed-assist\bindings.json` (Windows) with the default key map.
+Edit this file to customise which physical key each logical action triggers.
+
+```json
+{
+  "boost":             "Tab",
+  "next_firegroup":    "bracketright",
+  "prev_firegroup":    "bracketleft",
+  "landing_gear":      "l",
+  "deploy_hardpoints": "u",
+  "hyperspace_jump":   "j",
+  "galaxy_map":        "m",
+  "system_map":        "comma",
+  "enter_fss":         "backslash",
+  "...":               "..."
+}
+```
+
+Key values on Linux are X11 keysym names (e.g. `Tab`, `bracketright`,
+`KP_Add`).  On Windows they are Virtual-Key names accepted by
+`pydirectinput` (e.g. `tab`, `]`, `[`).
+
+The client sends the **logical name** (`"boost"`, `"landing_gear"`, …);
+the agent resolves it to the physical key locally, so the bindings file
+only needs to exist on the agent machine.
 
 ---
 
@@ -214,5 +266,16 @@ Then add the constant to `shared/roles_def.py`.
 
 | Platform | Process detection | Key simulation |
 |---|---|---|
-| Windows | `EliteDangerous64.exe` by name | `pydirectinput` / `SendInput` (DirectInput) |
-| Linux (Proton) | cmdline scan for `EliteDangerous*.exe` | `python-xlib` or `evdev` |
+| Windows | `EliteDangerous64.exe` by name | `pydirectinput` (preferred) → `ctypes SendInput` (KEYEVENTF_SCANCODE fallback) |
+| Linux / Proton (X11) | cmdline scan for `EliteDangerous*.exe` | `python-xlib` XTEST (preferred) |
+| Linux / Proton (Wayland / headless) | cmdline scan for `EliteDangerous*.exe` | `evdev` UInput (`/dev/uinput` must be writable) |
+
+The active backend is logged at agent startup:
+
+```
+INFO  ActionHandler: using backend _XlibBackend
+```
+
+If no backend is available a warning is printed and key actions are dropped
+(all other functionality — monitoring, event streaming, panels — continues
+to work normally).

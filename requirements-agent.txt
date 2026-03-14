@@ -2,9 +2,22 @@
 #
 # Install with:   pip install -r requirements-agent.txt
 #
-# Runtime dependencies
+# ── Runtime (always required) ────────────────────────────────────────────────
 psutil          # ED process detection
 websockets      # WebSocket server (asyncio)
-#
-# One-time setup only (cert generation — can be installed separately)
 cryptography    # TLS self-signed certificate generation
+
+# ── Key injection — Linux (install at least one) ─────────────────────────────
+# python-xlib is preferred when a DISPLAY is available (X11 / Proton):
+#   pip install python-xlib
+#
+# evdev is used as a fallback (requires /dev/uinput write access):
+#   pip install evdev
+#   sudo usermod -aG input $USER   # or create a udev rule
+
+# ── Key injection — Windows ───────────────────────────────────────────────────
+# pydirectinput sends DirectInput-compatible events (required for ED):
+#   pip install pydirectinput
+#
+# If pydirectinput is not installed the agent falls back to a pure-ctypes
+# SendInput implementation (KEYEVENTF_SCANCODE) — no extra package needed.
