@@ -1,0 +1,10 @@
+# ED Assist — Agent dependencies
+#
+# Install with:   pip install -r requirements-agent.txt
+#
+# Runtime dependencies
+psutil          # ED process detection
+websockets      # WebSocket server (asyncio)
+#
+# One-time setup only (cert generation — can be installed separately)
+cryptography    # TLS self-signed certificate generation

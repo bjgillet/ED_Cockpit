@@ -1,0 +1,9 @@
+# ED Assist — Client dependencies
+#
+# Install with:   pip install -r requirements-client.txt
+#
+# Runtime dependencies
+websockets      # WebSocket client (asyncio)
+#
+# One-time setup only (cert pinning — can be installed separately)
+cryptography    # TLS certificate fingerprint verification
