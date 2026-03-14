@@ -124,6 +124,25 @@ class ClientRegistry:
         self.save()
         return True
 
+    def set_label(self, client_id: str, label: str) -> bool:
+        """Update the human-readable label for a client. Returns False if not found."""
+        with self._lock:
+            rec = self._store.get(client_id)
+            if rec is None:
+                return False
+            rec.label = label
+        self.save()
+        return True
+
+    def remove(self, client_id: str) -> bool:
+        """Delete a client record. Returns False if the client did not exist."""
+        with self._lock:
+            if client_id not in self._store:
+                return False
+            del self._store[client_id]
+        self.save()
+        return True
+
     def update_last_seen(self, client_id: str, timestamp: str) -> None:
         with self._lock:
             rec = self._store.get(client_id)

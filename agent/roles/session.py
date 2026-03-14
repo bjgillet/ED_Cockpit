@@ -73,11 +73,37 @@ Wire payload shapes
 
   Shutdown →
     { "event": "Shutdown" }
+
+Status payload (filter_status) →
+    {
+      "fuel_main":       <float t>,
+      "fuel_reservoir":  <float t>,
+      "hull_health":     <float 0-1>,
+      "shield_health":   <float 0-1>,
+      "cargo":           <float t>,
+      "legal_state":     "<string>",
+      "docked":          <bool>,
+      "landed":          <bool>,
+      "in_srv":          <bool>,
+      "supercruise":     <bool>,
+      "hyperspace":      <bool>,
+      "on_foot":         <bool>,
+      "shields_up":      <bool>,
+    }
 """
 from __future__ import annotations
 
 from agent.roles.base_role import BaseRole
 from shared.roles_def import Role
+
+# ── Status.json flag bits ──────────────────────────────────────────────────
+_FLAG_DOCKED      = 0x00000001
+_FLAG_LANDED      = 0x00000002
+_FLAG_SHIELDS_UP  = 0x00000008
+_FLAG_SUPERCRUISE = 0x00000010
+_FLAG_HYPERDRIVE  = 0x04000000
+_FLAG_IN_SRV      = 0x00040000
+_FLAG2_ON_FOOT    = 0x00000001   # Flags2 bit 0
 
 
 class SessionRole(BaseRole):
@@ -99,6 +125,27 @@ class SessionRole(BaseRole):
         if handler is None:
             return None
         return handler(data)
+
+    def filter_status(self, status: dict) -> dict | None:
+        flags  = int(status.get("Flags",  0))
+        flags2 = int(status.get("Flags2", 0))
+        fuel   = status.get("Fuel", {})
+        health = status.get("Health", {})
+        return {
+            "fuel_main":      float(fuel.get("FuelMain",      0.0)),
+            "fuel_reservoir": float(fuel.get("FuelReservoir", 0.0)),
+            "hull_health":    float(health.get("Hull",    1.0)),
+            "shield_health":  float(health.get("Shield",  1.0)),
+            "cargo":          float(status.get("Cargo", 0.0)),
+            "legal_state":    str(status.get("LegalState", "")),
+            "docked":         bool(flags & _FLAG_DOCKED),
+            "landed":         bool(flags & _FLAG_LANDED),
+            "in_srv":         bool(flags & _FLAG_IN_SRV),
+            "supercruise":    bool(flags & _FLAG_SUPERCRUISE),
+            "hyperspace":     bool(flags & _FLAG_HYPERDRIVE),
+            "on_foot":        bool(flags2 & _FLAG2_ON_FOOT),
+            "shields_up":     bool(flags & _FLAG_SHIELDS_UP),
+        }
 
 
 # ── Static event handlers ──────────────────────────────────────────────────

@@ -41,6 +41,12 @@ Wire payload shapes
       "event":      "LaunchDrone",
       "drone_type": "Collector" | "Prospector",
     }
+
+Status payload (filter_status) →
+    {
+      "cargo":          <float t>,
+      "cargo_scoop":    <bool>,
+    }
 """
 from __future__ import annotations
 
@@ -48,6 +54,9 @@ from agent.roles.base_role import BaseRole
 from shared.roles_def import Role
 
 _MINING_DRONE_TYPES: frozenset[str] = frozenset({"Collector", "Prospector"})
+
+# ── Status.json flag bit ───────────────────────────────────────────────────
+_FLAG_CARGO_SCOOP = 0x00000200
 
 
 class MiningRole(BaseRole):
@@ -71,6 +80,13 @@ class MiningRole(BaseRole):
         if event_name == "LaunchDrone":
             return self._handle_launch_drone(data)
         return None
+
+    def filter_status(self, status: dict) -> dict | None:
+        flags = int(status.get("Flags", 0))
+        return {
+            "cargo":       float(status.get("Cargo", 0.0)),
+            "cargo_scoop": bool(flags & _FLAG_CARGO_SCOOP),
+        }
 
     # ── Event handlers ─────────────────────────────────────────────────────
 

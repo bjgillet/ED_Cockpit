@@ -58,6 +58,7 @@ for _p in (_ROOT, _AGENT):
 
 from agent.core.ed_app import EDApp
 from agent.GUI.ed_status_monitor import EDStatusMonitor
+from agent.GUI.client_manager import ClientManager
 
 
 def main() -> None:
@@ -72,9 +73,12 @@ def main() -> None:
     root.withdraw()
     root.title("ED Assist")
 
-    # ── 3. Open the initial window ────────────────────────────────────────
-    #       quit_on_close=True → closing this window stops the event loop
+    # ── 3. Open the initial windows ───────────────────────────────────────
+    #       quit_on_close=True on the Status Monitor → closing it stops
+    #       the whole application.
     EDStatusMonitor(root, app, quit_on_close=True)
+    cm = ClientManager(root, app)
+    app.subscribe_actions(cm.push_action)
 
     # ── 4. Run the event loop ─────────────────────────────────────────────
     try:

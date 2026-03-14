@@ -8,13 +8,15 @@ A role is responsible for:
      (``journal_events``).
   2. Filtering and optionally enriching raw event data before it is
      forwarded to subscribed clients (``filter()``).
+  3. Optionally filtering Status.json updates (``filter_status()``).
 
 Adding a new role
 -----------------
   1. Create ``agent/roles/<role_name>.py`` with a class inheriting BaseRole.
   2. Set ``name`` and ``journal_events``.
   3. Override ``filter()``.
-  4. Register the class in ``agent/roles/__init__.py``.
+  4. Optionally override ``filter_status()`` to receive live Status.json data.
+  5. Register the class in ``agent/roles/__init__.py``.
 
 No changes to the agent core are required.
 
@@ -61,3 +63,27 @@ class BaseRole(ABC):
             The data payload to include in the ``EventMessage.data`` field,
             or ``None`` to drop the event entirely.
         """
+
+    def filter_status(self, status: dict) -> dict | None:
+        """
+        Process a Status.json snapshot and return filtered data to broadcast.
+
+        Called every time StatusReader delivers a new Status.json payload.
+        The default implementation returns ``None`` (opt-out).  Override in
+        roles that need live status data.
+
+        Parameters
+        ----------
+        status : dict
+            The full parsed Status.json dict (keys: Flags, Flags2, Fuel,
+            Cargo, LegalState, Latitude, Longitude, Heading, Altitude,
+            BodyName, PlanetRadius, Health, Pips, FireGroup, GuiFocus,
+            timestamp, event).
+
+        Returns
+        -------
+        dict | None
+            The data payload to broadcast as an EventMessage(event="Status"),
+            or ``None`` to suppress broadcast for this role.
+        """
+        return None

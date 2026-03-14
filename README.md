@@ -216,6 +216,36 @@ only needs to exist on the agent machine.
 
 ---
 
+## Action buttons
+
+The **Navigation** and **Mining** client panels include a **QUICK ACTIONS**
+strip with one-click buttons that send a signed key-press to the agent:
+
+| Panel | Buttons |
+|---|---|
+| Navigation | Hyperspace Jump · Boost · Galaxy Map · System Map · Landing Gear · Recall/Dismiss Ship |
+| Mining | Prev/Next Firegroup · Deploy Hardpoints · Cargo Scoop · Enter FSS · Boost |
+
+Each click is authenticated with HMAC-SHA256 and a monotonically increasing
+sequence number (replay protection).  The agent's **Client Manager** window
+shows a live **ACTION LOG** at the bottom listing the last 6 actions received,
+with timestamp, client label, and key name.
+
+To add a button for a key that is not in the default list:
+
+1. Add the mapping to `bindings.json` on the agent machine:
+   ```json
+   { "my_action": "F5" }
+   ```
+2. In the relevant client panel, add a button:
+   ```python
+   tk.Button(row, text="My Action",
+             command=lambda: self.send_action("key_press", "my_action"),
+             **_BTN).pack(side="left", padx=3)
+   ```
+
+---
+
 ## Security
 
 | Layer | Mechanism |
@@ -279,3 +309,74 @@ INFO  ActionHandler: using backend _XlibBackend
 If no backend is available a warning is printed and key actions are dropped
 (all other functionality — monitoring, event streaming, panels — continues
 to work normally).
+
+---
+
+## Installation (optional)
+
+To install both programs as proper Python packages with `ed-agent` /
+`ed-client` entry-point scripts:
+
+```bash
+# From the repo root — installs in editable mode
+pip install -e ".[agent-linux]"   # Linux (X11 + evdev)
+pip install -e ".[agent-windows]" # Windows
+pip install -e ".[client]"        # Client machine
+
+# Then launch with:
+ed-agent
+ed-client
+```
+
+Without installation, the programs can always be run directly:
+
+```bash
+python agent/main.py
+python client/main.py
+```
+
+---
+
+## Troubleshooting
+
+### Key actions are received by the agent but not delivered to the game
+
+- **Linux X11**: make sure `DISPLAY` is set in the terminal where the agent
+  runs (`echo $DISPLAY` should print `:0` or similar) and that
+  `python-xlib` is installed.
+- **Linux Wayland / headless**: install `evdev` and ensure `/dev/uinput` is
+  writable (`sudo usermod -aG input $USER`, then log out and back in).
+- **Windows**: install `pydirectinput` (`pip install pydirectinput`).  The
+  ctypes fallback works for most games but pydirectinput is more reliable
+  for DirectInput titles like Elite Dangerous.
+- Check the agent log for the line `ActionHandler: using backend …` — if it
+  says `_NullBackend`, no injection backend could be initialised.
+
+### Client cannot connect — TLS fingerprint mismatch
+
+The client pins the agent's certificate fingerprint on first connect (TOFU).
+If you regenerated the agent's TLS certificate, delete the pinned fingerprint
+from the client config:
+
+```bash
+# Linux
+nano ~/.config/ed-assist/client.json   # remove the "cert_fingerprint" line
+# Windows
+notepad %APPDATA%\ed-assist\client.json
+```
+
+The client will re-pin on the next successful connection.
+
+### Client connects but receives no events
+
+- Verify the client's assigned roles in the **Client Manager** window (the
+  agent only forwards events to clients whose role list includes the matching
+  role).
+- Check that Elite Dangerous is actually running and detected (the
+  **Status Monitor** window on the agent shows the detection state).
+
+### `bindings.json` not found / key not recognised
+
+The agent writes `bindings.json` on first run.  If a button press produces
+a log line like `ActionHandler: unknown logical key 'my_action'`, add the
+mapping to `bindings.json` and restart the agent.

@@ -51,11 +51,27 @@ Wire payload shapes
       "orbital_inc":   <float deg>,
       "eccentricity":  <float>,
     }
+
+Status payload (filter_status) — only emitted when positional data is present →
+    {
+      "latitude":     <float deg>,
+      "longitude":    <float deg>,
+      "heading":      <int deg 0-359>,
+      "altitude":     <float m>,
+      "body_radius":  <float m>,
+      "body_name":    "<string>",
+      "landed":       <bool>,
+      "in_srv":       <bool>,
+    }
 """
 from __future__ import annotations
 
 from agent.roles.base_role import BaseRole
 from shared.roles_def import Role
+
+# ── Status.json flag bits ──────────────────────────────────────────────────
+_FLAG_LANDED = 0x00000002
+_FLAG_IN_SRV = 0x00040000
 
 
 class NavigationRole(BaseRole):
@@ -76,6 +92,22 @@ class NavigationRole(BaseRole):
         if handler is None:
             return None
         return handler(data)
+
+    def filter_status(self, status: dict) -> dict | None:
+        # Latitude is only present when the ship is near a planetary body.
+        if "Latitude" not in status:
+            return None
+        flags = int(status.get("Flags", 0))
+        return {
+            "latitude":    float(status.get("Latitude",     0.0)),
+            "longitude":   float(status.get("Longitude",    0.0)),
+            "heading":     int(status.get("Heading",        0)),
+            "altitude":    float(status.get("Altitude",     0.0)),
+            "body_radius": float(status.get("PlanetRadius", 0.0)),
+            "body_name":   str(status.get("BodyName",       "")),
+            "landed":      bool(flags & _FLAG_LANDED),
+            "in_srv":      bool(flags & _FLAG_IN_SRV),
+        }
 
 
 # ── Static event handlers ──────────────────────────────────────────────────

@@ -115,6 +115,7 @@ class EDApp:
 
         self._lock        = threading.Lock()
         self._subscribers: List[queue.Queue] = []
+        self._action_observers: List[Callable[[str, str, str], None]] = []
 
         # ── Role handlers (instantiated once) ────────────────────────────
         self._roles = {name: get_role(name) for name in all_role_names()}
@@ -198,6 +199,29 @@ class EDApp:
             except ValueError:
                 pass
 
+    def subscribe_actions(
+        self, callback: Callable[[str, str, str], None]
+    ) -> None:
+        """
+        Register a callable to be notified of every verified action.
+
+        The callback signature is ``(client_id, action, key) -> None``.
+        It is called from the asyncio thread, so it must be thread-safe
+        (e.g. put onto a queue — do not update tkinter widgets directly).
+        """
+        with self._lock:
+            if callback not in self._action_observers:
+                self._action_observers.append(callback)
+
+    def unsubscribe_actions(
+        self, callback: Callable[[str, str, str], None]
+    ) -> None:
+        with self._lock:
+            try:
+                self._action_observers.remove(callback)
+            except ValueError:
+                pass
+
     def snapshot(self) -> Dict:
         return self.watcher.snapshot()
 
@@ -214,6 +238,12 @@ class EDApp:
     def cert_path(self) -> Path:
         """Path to the agent's TLS certificate (share with clients)."""
         return self._cert_path
+
+    def connected_client_ids(self) -> list[str]:
+        """Return a snapshot of currently connected client IDs (thread-safe)."""
+        if self._ws_server is None:
+            return []
+        return self._ws_server.connected_clients
 
     @property
     def cert_fingerprint(self) -> str:
@@ -234,6 +264,20 @@ class EDApp:
         if ok and self._loop and self._ws_server:
             asyncio.run_coroutine_threadsafe(
                 self._ws_server.push_roles_updated(client_id, roles),
+                self._loop,
+            )
+        return ok
+
+    def revoke_client(self, client_id: str) -> bool:
+        """
+        Remove a client from the registry and disconnect it if online.
+
+        Returns True if the client existed and was removed.
+        """
+        ok = self._registry.remove(client_id)
+        if ok and self._loop and self._ws_server:
+            asyncio.run_coroutine_threadsafe(
+                self._ws_server.disconnect_client(client_id),
                 self._loop,
             )
         return ok
@@ -292,11 +336,30 @@ class EDApp:
         """
         Handle a Status.json update.
 
-        Currently routes the raw status dict to all role handlers that
-        declare interest in status updates (future extension point).
-        For now it is a no-op placeholder kept for architectural clarity.
+        Iterates all roles, calls ``filter_status()``, and broadcasts the
+        result as an ``EventMessage(event="Status")`` on the role's channel.
+        Uses the same ``_broadcast_event`` path as journal events — no new
+        message type required.
         """
-        pass
+        if self._loop is None:
+            return
+
+        timestamp: str = status_data.get("timestamp", "")
+
+        for role_name, role in self._roles.items():
+            filtered = role.filter_status(status_data)
+            if filtered is None:
+                continue
+            msg = EventMessage(
+                role      = role_name,
+                event     = "Status",
+                timestamp = timestamp,
+                data      = filtered,
+            )
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast_event(role_name, msg.to_dict()),
+                self._loop,
+            )
 
     # ── Asyncio helpers ────────────────────────────────────────────────────
 
@@ -341,8 +404,19 @@ class EDApp:
 
         Forwards the request to the ActionHandler which translates the
         logical key name to a platform-level key injection.
+        Notifies any registered GUI observer (thread-safe via queue).
         """
         log.info("Action from %s: %s(%s)", client_id, action, key)
+
+        # Notify GUI observers (e.g. ClientManager action log)
+        with self._lock:
+            observers = list(self._action_observers)
+        for obs in observers:
+            try:
+                obs(client_id, action, key)
+            except Exception:
+                pass
+
         dispatched = self._action_handler.execute(action, key)
         if not dispatched:
             log.warning(

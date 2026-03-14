@@ -383,3 +383,10 @@ class WSServer:
     def connected_clients(self) -> list[str]:
         """Return a snapshot list of currently connected client IDs."""
         return list(self._connections.keys())
+
+    async def disconnect_client(self, client_id: str) -> None:
+        """Forcibly close the connection for a specific client (if online)."""
+        async with self._lock:
+            conn = self._connections.pop(client_id, None)
+        if conn:
+            await self._close_ws(conn.ws, 1008, "revoked by operator")
