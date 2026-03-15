@@ -1,5 +1,5 @@
 """
-ED Assist — Application Core
+ED Cockpit — Application Core
 =============================
 Central application object that owns all persistent backend services and
 acts as the single communication hub between them, the GUI, and network
@@ -70,9 +70,9 @@ WS_PORT: int = 5759
 
 def _default_config_dir() -> Path:
     if sys.platform == "win32":
-        base = Path.home() / "AppData" / "Roaming" / "ed-assist"
+        base = Path.home() / "AppData" / "Roaming" / "ed-cockpit"
     else:
-        base = Path.home() / ".config" / "ed-assist"
+        base = Path.home() / ".config" / "ed-cockpit"
     base.mkdir(parents=True, exist_ok=True)
     return base
 

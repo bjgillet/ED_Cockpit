@@ -1,4 +1,4 @@
-# ED Assist — Client dependencies
+# ED Cockpit — Client dependencies
 #
 # Install with:   pip install -r requirements-client.txt
 #

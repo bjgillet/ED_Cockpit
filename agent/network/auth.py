@@ -1,5 +1,5 @@
 """
-ED Assist — Agent Authentication
+ED Cockpit — Agent Authentication
 ==================================
 Validates incoming client connections using the pre-shared token scheme
 and verifies HMAC integrity on ActionMessages.

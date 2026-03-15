@@ -1,5 +1,5 @@
 """
-ED Assist — WebSocket Connection Manager (Client)
+ED Cockpit — WebSocket Connection Manager (Client)
 ===================================================
 Manages the asyncio WebSocket connection from the client to the agent:
 TLS handshake, authentication, automatic reconnection, and message routing.

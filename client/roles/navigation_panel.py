@@ -1,5 +1,5 @@
 """
-ED Assist — Navigation Panel
+ED Cockpit — Navigation Panel
 ==============================
 Client-side panel for the Navigation role.
 

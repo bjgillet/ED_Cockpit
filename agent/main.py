@@ -1,5 +1,5 @@
 """
-ED Assist — Agent Entry Point
+ED Cockpit — Agent Entry Point
 ===============================
 Creates the EDApp core, starts backend services, opens the initial GUI
 window, and runs the tkinter event loop.
@@ -71,7 +71,7 @@ def main() -> None:
     #       blank root window.  All real windows are Toplevel children.
     root = tk.Tk()
     root.withdraw()
-    root.title("ED Assist")
+    root.title("ED Cockpit")
 
     # ── 3. Open the initial windows ───────────────────────────────────────
     #       quit_on_close=True on the Status Monitor → closing it stops

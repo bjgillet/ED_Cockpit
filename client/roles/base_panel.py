@@ -1,5 +1,5 @@
 """
-ED Assist — Base Panel (Client)
+ED Cockpit — Base Panel (Client)
 =================================
 Abstract base class for all client-side role panels.
 

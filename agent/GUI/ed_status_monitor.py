@@ -1,5 +1,5 @@
 """
-ED Assist — Status Monitor
+ED Cockpit — Status Monitor
 ==========================
 Tkinter/ttk window that displays the live detection status produced by
 the EDApp core (../ed_app.py).
@@ -17,7 +17,7 @@ threads never touch any tkinter widget.
 Layout
 ------
   ┌──────────────────────────────────────────────────────────┐
-  │  ED ASSIST — PROCESS MONITOR                             │
+  │  ED COCKPIT — PROCESS MONITOR                             │
   ├──────────────────────────────────────────────────────────┤
   │  ELITE DANGEROUS PROCESS                                  │
   │   ●  Searching…  /  ●  Running: EliteDangerous64.exe     │
@@ -180,7 +180,7 @@ class EDStatusMonitor(tk.Toplevel):
         self._blink_state:  bool  = False
         self._quit_on_close: bool = quit_on_close
 
-        self.title("ED Assist — Process Monitor")
+        self.title("ED Cockpit — Process Monitor")
         self.configure(bg=BG)
         self.resizable(True, False)
         self.minsize(580, 0)
@@ -203,7 +203,7 @@ class EDStatusMonitor(tk.Toplevel):
         bar.pack(fill="x")
         tk.Label(
             bar,
-            text="ED ASSIST — PROCESS MONITOR",
+            text="ED COCKPIT — PROCESS MONITOR",
             bg=HEADER_BG, fg=HEADER_FG,
             font=FONT_TITLE,
         ).pack(padx=14)

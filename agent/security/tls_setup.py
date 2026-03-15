@@ -1,5 +1,5 @@
 """
-ED Assist — TLS Setup
+ED Cockpit — TLS Setup
 =======================
 Utilities for generating and loading the self-signed TLS certificate used
 by the agent's WebSocket server, and for building SSL contexts on both sides.
@@ -27,7 +27,7 @@ Trust On First Use (TOFU) model
 
 Files
 -----
-  Agent config dir (~/.config/ed-assist/ or %APPDATA%\\ed-assist\\)
+  Agent config dir (~/.config/ed-cockpit/ or %APPDATA%\\ed-cockpit\\)
     agent.crt   — PEM certificate   (share with clients or share fingerprint)
     agent.key   — PEM private key   (NEVER share)
   Client config dir (same default location)

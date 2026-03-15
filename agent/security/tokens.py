@@ -1,5 +1,5 @@
 """
-ED Assist — Token Management
+ED Cockpit — Token Management
 ==============================
 Generates and hashes pre-shared tokens used for client authentication.
 

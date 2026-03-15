@@ -1,5 +1,5 @@
 """
-ED Assist — Mining Role
+ED Cockpit — Mining Role
 =========================
 Filters Elite Dangerous journal events relevant to mining activities.
 

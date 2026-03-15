@@ -1,5 +1,5 @@
 """
-ED Assist — Base Role
+ED Cockpit — Base Role
 ======================
 Abstract base class that every agent-side role module must implement.
 

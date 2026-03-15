@@ -1,5 +1,5 @@
 """
-ED Assist — Session Monitoring Panel
+ED Cockpit — Session Monitoring Panel
 =======================================
 Client-side panel for the Session Monitoring role.
 

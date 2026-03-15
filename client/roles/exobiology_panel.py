@@ -1,5 +1,5 @@
 """
-ED Assist — Exobiology Panel
+ED Cockpit — Exobiology Panel
 ==============================
 Client-side panel for the Exobiology role.
 

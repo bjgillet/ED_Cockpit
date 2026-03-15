@@ -1,5 +1,5 @@
 """
-ED Assist — Journal Reader
+ED Cockpit — Journal Reader
 ============================
 Tails the active Elite Dangerous journal file and emits parsed JSON events
 to a registered callback as they are appended.

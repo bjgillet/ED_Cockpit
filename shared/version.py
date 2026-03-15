@@ -1,5 +1,5 @@
 """
-ED Assist — Protocol Version
+ED Cockpit — Protocol Version
 =============================
 Single source of truth for the Agent ↔ Client wire protocol version.
 

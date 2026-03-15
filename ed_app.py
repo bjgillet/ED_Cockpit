@@ -1,5 +1,5 @@
 """
-ED Assist — Application Core
+ED Cockpit — Application Core
 =============================
 Central application object that owns all persistent backend services and
 acts as the single communication hub between them and any GUI window.

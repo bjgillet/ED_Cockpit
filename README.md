@@ -1,6 +1,10 @@
-# ED Assist
+# ED Cockpit
 
-**ED Assist** is a Python companion tool for **Elite Dangerous**.
+<p align="center">
+  <img src="Doc/banner.svg" alt="Elite Dangerous Cockpit" width="900"/>
+</p>
+
+**ED Cockpit** is a Python companion tool for **Elite Dangerous**.
 It runs on the same machine as the game, reads its journal and status files in
 real time, and streams live data over a secure WebSocket connection to one or
 more client windows — on the same machine or anywhere on your local network.

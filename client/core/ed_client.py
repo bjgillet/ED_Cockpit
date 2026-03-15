@@ -1,5 +1,5 @@
 """
-ED Assist — Client Core
+ED Cockpit — Client Core
 =========================
 Central client object.  Owns the WebSocket connection, drives the
 register → welcome handshake, and dispatches incoming EventMessages to

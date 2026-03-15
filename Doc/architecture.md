@@ -1,7 +1,11 @@
-# ED Assist — Architecture & Developer Guide
+# ED Cockpit — Architecture & Developer Guide
+
+<p align="center">
+  <img src="banner.svg" alt="Elite Dangerous Cockpit" width="900"/>
+</p>
 
 This document covers the internal design, module structure, security model,
-message protocol, and extension points of ED Assist.
+message protocol, and extension points of ED Cockpit.
 For installation and usage see [user-guide.md](user-guide.md).
 
 ---
@@ -22,7 +26,7 @@ For installation and usage see [user-guide.md](user-guide.md).
 
 ## System overview
 
-ED Assist is split into two independent programs that communicate over a
+ED Cockpit is split into two independent programs that communicate over a
 secure WebSocket connection:
 
 ```
@@ -95,7 +99,7 @@ No tkinter widget is ever touched from outside the main thread.
 ## Project structure
 
 ```
-ED_Assist/
+ED_Cockpit/
 ├── agent/                        # ED Agent — runs on the ED machine
 │   ├── main.py                   # Entry point; creates EDApp + GUI windows
 │   ├── core/
@@ -400,8 +404,8 @@ are required.
 
 ### 1 — Add the key binding (agent machine)
 
-In `~/.config/ed-assist/bindings.json` (Linux) or
-`%APPDATA%\ed-assist\bindings.json` (Windows):
+In `~/.config/ed-cockpit/bindings.json` (Linux) or
+`%APPDATA%\ed-cockpit\bindings.json` (Windows):
 
 ```json
 {

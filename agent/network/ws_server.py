@@ -1,5 +1,5 @@
 """
-ED Assist — Agent WebSocket Server
+ED Cockpit — Agent WebSocket Server
 ====================================
 Asyncio-based WebSocket server that accepts client connections, drives the
 authentication handshake, and routes messages between the agent core and

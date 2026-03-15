@@ -1,5 +1,5 @@
 """
-ED Assist — Status Reader
+ED Cockpit — Status Reader
 ===========================
 Polls the Elite Dangerous ``Status.json`` file and emits parsed state to a
 registered callback whenever the content changes.

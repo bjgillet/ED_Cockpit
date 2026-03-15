@@ -1,5 +1,5 @@
 """
-ED Assist — Exobiology Role
+ED Cockpit — Exobiology Role
 =============================
 Filters Elite Dangerous journal events relevant to exobiology activities
 and prepares them for forwarding to subscribed clients.

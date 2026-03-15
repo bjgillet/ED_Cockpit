@@ -1,5 +1,5 @@
 """
-ED Assist — Client Entry Point
+ED Cockpit — Client Entry Point
 ================================
 Connects to the ED Agent, registers for assigned roles, and opens the
 appropriate role panels.
@@ -51,7 +51,7 @@ def main() -> None:
 
     root = tk.Tk()
     root.withdraw()
-    root.title("ED Assist — Client")
+    root.title("ED Cockpit — Client")
 
     MainWindow(root, client, quit_on_close=True)
 

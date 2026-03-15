@@ -1,5 +1,5 @@
 """
-ED Assist — Message Envelope Definitions
+ED Cockpit — Message Envelope Definitions
 ==========================================
 Dataclasses representing every message that can travel over the
 Agent ↔ Client WebSocket connection.

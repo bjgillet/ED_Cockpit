@@ -1,5 +1,5 @@
 """
-ED Assist — Client Configuration
+ED Cockpit — Client Configuration
 ====================================
 Loads and persists the client's local configuration: Client_ID, raw token,
 agent address, port, and TLS settings.
@@ -8,8 +8,8 @@ Storage
 -------
   Configuration is stored in a JSON file at a platform-appropriate location:
 
-  Linux / macOS : ~/.config/ed-assist/client.json
-  Windows       : %APPDATA%\\ed-assist\\client.json
+  Linux / macOS : ~/.config/ed-cockpit/client.json
+  Windows       : %APPDATA%\\ed-cockpit\\client.json
 
   The raw token IS stored here (this is the client's secret credential).
   The file should be protected by the OS user-permissions model
@@ -43,9 +43,9 @@ from typing import Optional
 
 def _default_config_path() -> Path:
     if sys.platform == "win32":
-        base = Path.home() / "AppData" / "Roaming" / "ed-assist"
+        base = Path.home() / "AppData" / "Roaming" / "ed-cockpit"
     else:
-        base = Path.home() / ".config" / "ed-assist"
+        base = Path.home() / ".config" / "ed-cockpit"
     base.mkdir(parents=True, exist_ok=True)
     return base / "client.json"
 

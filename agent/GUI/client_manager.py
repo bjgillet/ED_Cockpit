@@ -1,5 +1,5 @@
 """
-ED Assist — Client Manager Window
+ED Cockpit — Client Manager Window
 ====================================
 Agent-side Tkinter window that lets the operator manage all registered
 clients: view online status, edit roles, rename, add new clients, and
@@ -8,7 +8,7 @@ revoke access.
 Layout
 ------
   ┌──────────────────────────────────────────────────────────────┐
-  │  ED ASSIST — CLIENT MANAGER                                  │
+  │  ED COCKPIT — CLIENT MANAGER                                  │
   ├──────────────────────────────────────────────────────────────┤
   │  Label / ID        Last Seen      Status    Roles            │
   │  ─────────────────────────────────────────────────────────── │
@@ -122,7 +122,7 @@ class ClientManager(tk.Toplevel):
 
     def __init__(self, parent: tk.Misc, app: "EDApp", **kwargs) -> None:
         super().__init__(parent, **kwargs)
-        self.title("ED Assist — Client Manager")
+        self.title("ED Cockpit — Client Manager")
         self.configure(bg=BG)
         self.minsize(680, 320)
         self.resizable(True, True)
@@ -149,7 +149,7 @@ class ClientManager(tk.Toplevel):
         bar = tk.Frame(self, bg=HEADER_BG, pady=6)
         bar.pack(fill="x")
         tk.Label(
-            bar, text="ED ASSIST — CLIENT MANAGER",
+            bar, text="ED COCKPIT — CLIENT MANAGER",
             bg=HEADER_BG, fg=HEADER_FG, font=FONT_TITLE,
         ).pack(padx=14)
 

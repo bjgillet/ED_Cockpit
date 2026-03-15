@@ -1,5 +1,5 @@
 """
-ED Assist — Client Role Panel Registry
+ED Cockpit — Client Role Panel Registry
 ========================================
 Maps canonical role names to their panel classes.
 

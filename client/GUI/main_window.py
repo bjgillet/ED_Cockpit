@@ -1,5 +1,5 @@
 """
-ED Assist — Main Client Window
+ED Cockpit — Main Client Window
 ================================
 Root client window that hosts the ActivityBar and dynamically renders only
 the role panels assigned to this client by the agent.
@@ -84,7 +84,7 @@ class MainWindow(tk.Toplevel):
         **kwargs,
     ) -> None:
         super().__init__(parent, **kwargs)
-        self.title("ED Assist")
+        self.title("ED Cockpit")
         self.configure(bg=BG)
         self.minsize(700, 400)
 

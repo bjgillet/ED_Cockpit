@@ -1,5 +1,5 @@
 """
-ED Assist — Role Registry
+ED Cockpit — Role Registry
 ===========================
 Central registration point for all agent-side roles.
 

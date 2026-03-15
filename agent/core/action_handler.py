@@ -1,5 +1,5 @@
 """
-ED Assist — Action Handler
+ED Cockpit — Action Handler
 ============================
 Executes hardware-level key-press actions on the machine running the agent,
 on behalf of authenticated client requests.
@@ -330,7 +330,7 @@ class _EvdevBackend(_Backend):
             ]
             self._ui = UInput(
                 {ecodes.EV_KEY: key_codes},
-                name="ed-assist-virtual-keyboard",
+                name="ed-cockpit-virtual-keyboard",
                 version=0x3,
             )
             self._ok = True
@@ -552,8 +552,8 @@ class ActionHandler:
     ----------
     config_dir : Path, optional
         Directory that contains (or will contain) ``bindings.json``.
-        Defaults to ``~/.config/ed-assist/`` on Linux / macOS and
-        ``%APPDATA%\\ed-assist\\`` on Windows.
+        Defaults to ``~/.config/ed-cockpit/`` on Linux / macOS and
+        ``%APPDATA%\\ed-cockpit\\`` on Windows.
     key_map : dict, optional
         Fully overrides the key map (bindings.json and defaults are ignored).
         Intended for unit tests.

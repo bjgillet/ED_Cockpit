@@ -1,5 +1,5 @@
 """
-ED Assist — Navigation Role
+ED Cockpit — Navigation Role
 =============================
 Filters Elite Dangerous journal events relevant to planet/surface
 navigation: approach, landing, surface signals, and barycentre scans.

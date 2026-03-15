@@ -1,5 +1,5 @@
 """
-ED Assist — Canonical Role Definitions
+ED Cockpit — Canonical Role Definitions
 ========================================
 Single source of truth for role names shared between the agent and client.
 

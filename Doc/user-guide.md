@@ -1,6 +1,10 @@
-# ED Assist — User Guide
+# ED Cockpit — User Guide
 
-This guide covers everything you need to install, configure, and use ED Assist
+<p align="center">
+  <img src="banner.svg" alt="Elite Dangerous Cockpit" width="900"/>
+</p>
+
+This guide covers everything you need to install, configure, and use ED Cockpit
 as a player.  For architecture and development documentation see
 [architecture.md](architecture.md).
 
@@ -98,8 +102,8 @@ The certificate and private key are written to:
 
 | Platform | Location |
 |---|---|
-| Linux / macOS | `~/.config/ed-assist/` |
-| Windows | `%APPDATA%\ed-assist\` |
+| Linux / macOS | `~/.config/ed-cockpit/` |
+| Windows | `%APPDATA%\ed-cockpit\` |
 
 The script also prints a **fingerprint** — keep it handy for the client setup.
 
@@ -138,8 +142,8 @@ On the client machine, create the config file at the path for your platform:
 
 | Platform | Path |
 |---|---|
-| Linux / macOS | `~/.config/ed-assist/client.json` |
-| Windows | `%APPDATA%\ed-assist\client.json` |
+| Linux / macOS | `~/.config/ed-cockpit/client.json` |
+| Windows | `%APPDATA%\ed-cockpit\client.json` |
 
 Paste in the values from the clipboard:
 
@@ -196,8 +200,8 @@ All fields in `client.json`:
 
 ## Key bindings
 
-On first run the agent writes `~/.config/ed-assist/bindings.json` (Linux) or
-`%APPDATA%\ed-assist\bindings.json` (Windows) with the default key map.
+On first run the agent writes `~/.config/ed-cockpit/bindings.json` (Linux) or
+`%APPDATA%\ed-cockpit\bindings.json` (Windows) with the default key map.
 Edit this file to customise which physical key each logical action triggers.
 
 ```json
@@ -277,7 +281,7 @@ The agent listens on TCP port **5759**.  Windows Defender Firewall will prompt
 on first run — allow it on **Private networks**.  To add the rule manually:
 
 ```powershell
-netsh advfirewall firewall add rule name="ED Assist Agent" ^
+netsh advfirewall firewall add rule name="ED Cockpit Agent" ^
       dir=in action=allow protocol=TCP localport=5759
 ```
 
@@ -300,8 +304,8 @@ The `client_id` or `token` in `client.json` does not match the record stored
 on the agent.
 
 - Re-copy the values from the agent's `clients.json`
-  (`%APPDATA%\ed-assist\clients.json` on Windows,
-  `~/.config/ed-assist/clients.json` on Linux).
+  (`%APPDATA%\ed-cockpit\clients.json` on Windows,
+  `~/.config/ed-cockpit/clients.json` on Linux).
 - If the token was lost, revoke the client in **Client Manager** and add it
   again to generate a new token.
 
@@ -314,10 +318,10 @@ Clear it from `client.json`:
 
 ```bash
 # Linux
-nano ~/.config/ed-assist/client.json   # remove or empty "cert_fingerprint"
+nano ~/.config/ed-cockpit/client.json   # remove or empty "cert_fingerprint"
 
 # Windows
-notepad %APPDATA%\ed-assist\client.json
+notepad %APPDATA%\ed-cockpit\client.json
 ```
 
 The client will re-pin on the next successful connection.

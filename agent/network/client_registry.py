@@ -1,5 +1,5 @@
 """
-ED Assist — Client Registry
+ED Cockpit — Client Registry
 ==============================
 Persists and manages the agent-side record of every known client:
 its Client_ID, hashed token, assigned roles, and last-seen timestamp.

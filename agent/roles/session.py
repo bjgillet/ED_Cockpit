@@ -1,5 +1,5 @@
 """
-ED Assist — Session Monitoring Role
+ED Cockpit — Session Monitoring Role
 =====================================
 Filters Elite Dangerous journal events relevant to general session
 monitoring: game state, system / station location, commander status.

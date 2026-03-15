@@ -1,4 +1,4 @@
-"""Auto-generated — base64-encoded GIF icons for ED Assist."""
+"""Auto-generated — base64-encoded GIF icons for ED Cockpit."""
 
 EXOBIOLOGY = (
     "R0lGODdhQABAAIQAABocKxUmKxmbZBQ0MUvwqDzmoCi0eA5fPiAgMzfSkar/18j/5jS7hAxGMDKg"

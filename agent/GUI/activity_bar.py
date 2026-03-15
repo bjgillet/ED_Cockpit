@@ -1,5 +1,5 @@
 """
-ED Assist — Activity Bar
+ED Cockpit — Activity Bar
 Horizontal row of 7 icon buttons, one per in-game activity.
 
 Run:      python3 activity_bar.py
@@ -147,7 +147,7 @@ class ActivityBar(tk.Frame):
 # ---------------------------------------------------------------------------
 def main():
     root = tk.Tk()
-    root.title("ED Assist — Activity Bar")
+    root.title("ED Cockpit — Activity Bar")
     root.configure(bg=BG)
     root.resizable(False, False)
 

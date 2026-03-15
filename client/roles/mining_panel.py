@@ -1,5 +1,5 @@
 """
-ED Assist — Mining Panel
+ED Cockpit — Mining Panel
 ==========================
 Client-side panel for the Mining role.
 

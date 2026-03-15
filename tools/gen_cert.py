@@ -1,5 +1,5 @@
 """
-ED Assist — Certificate Generator (one-time setup tool)
+ED Cockpit — Certificate Generator (one-time setup tool)
 =========================================================
 Run this once on the agent machine to generate the self-signed TLS
 certificate and private key used by the WebSocket server.
@@ -41,11 +41,11 @@ from agent.security.tls_setup import generate_self_signed_cert, cert_fingerprint
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate ED Assist agent TLS certificate",
+        description="Generate ED Cockpit agent TLS certificate",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--out",  default="",          metavar="DIR",
-                        help="Output directory (default: ~/.config/ed-assist/)")
+                        help="Output directory (default: ~/.config/ed-cockpit/)")
     parser.add_argument("--cn",   default="ed-agent",  metavar="NAME",
                         help="Certificate common name (default: ed-agent)")
     parser.add_argument("--days", default=3650, type=int, metavar="N",
@@ -59,9 +59,9 @@ def main() -> None:
         out_dir = Path(args.out)
     else:
         if sys.platform == "win32":
-            out_dir = Path.home() / "AppData" / "Roaming" / "ed-assist"
+            out_dir = Path.home() / "AppData" / "Roaming" / "ed-cockpit"
         else:
-            out_dir = Path.home() / ".config" / "ed-assist"
+            out_dir = Path.home() / ".config" / "ed-cockpit"
 
     out_dir.mkdir(parents=True, exist_ok=True)
     cert_path = out_dir / "agent.crt"
