@@ -295,6 +295,12 @@ class EDApp:
         if state.get("phase") == EDWatcherState.COMPLETE:
             self._journal.set_path(state.get("journal_path"))
             self._status.set_path(state.get("status_path"))
+            if self._journal:
+                journal_dir = Path(self._journal).parent
+                exo_role = self._roles.get("exobiology")
+                if exo_role:
+                    exo_role.set_journal_dir(journal_dir)
+
         elif state.get("phase") == EDWatcherState.SEARCHING_PROCESS:
             self._journal.set_path(None)
             self._status.set_path(None)
