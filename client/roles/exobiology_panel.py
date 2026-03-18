@@ -4,41 +4,70 @@ ED Cockpit — Exobiology Panel
 Client-side panel for the Exobiology role.
 
 Displays live exobiology data received from the agent:
-  • Per-body / per-species scan progress (via BioScanTable)
-  • Total estimated payout (REMAINING) and total collected (SCANNED)
+  • Per-system / per-body / per-species scan progress (via BioScanTable)
+  • Total estimated payout (REMAINING) and total collected (EARNED)
   • Sale summary footer updated on SellOrganicData
 
 Data model
 ----------
-The panel maintains an internal dict keyed by body name.  Each body entry
-holds a list of species dicts compatible with BioScanTable's data format:
+The panel maintains an internal dict keyed first by system, then by body.
+Each body entry holds a species dict compatible with BioScanTable's format:
 
     {
-        "body":         "<body name>",
-        "remaining_cr": "<cr formatted>",   # sum of unsold values
-        "scanned_cr":   "<cr formatted>",   # sum of sold values
-        "species": [
-            {
-              "name":         "<species> - <variant>" | "UNIDENTIFIED …",
-              "remaining_cr": "<cr>",
-              "scanned_cr":   "<cr>",
-              "hist":         "<scan count>",
-              "done":         "Y" | "",
-              "gc":           <bool>,
-            },
-            ...
-        ],
+        "<system name>": {
+            "<body name>": {
+                "remaining_cr": <int>,
+                "scanned_cr":   <int>,
+                "species": {
+                    "<display name>": {
+                        "scan_count": <int>,
+                        "value":      <int>,
+                        "sold":       <bool>,
+                    },
+                    ...
+                }
+            }
+        }
     }
+
+BioScanTable receives a list grouped by system:
+
+    [
+        {
+            "system":       "<system name>",
+            "remaining_cr": "<cr formatted>",
+            "scanned_cr":   "<cr formatted>",
+            "bodies": [
+                {
+                    "body":         "<body name>",
+                    "remaining_cr": "<cr formatted>",
+                    "scanned_cr":   "<cr formatted>",
+                    "species": [
+                        {
+                          "name":         "<species> - <variant>" | "UNIDENTIFIED …",
+                          "remaining_cr": "<cr>",
+                          "scanned_cr":   "<cr>",
+                          "hist":         "<scan count>",
+                          "done":         "Y" | "",
+                          "gc":           <bool>,
+                        },
+                        ...
+                    ],
+                },
+                ...
+            ],
+        },
+        ...
+    ]
 
 Events consumed
 ---------------
-  ScanOrganic       — adds / updates a species row on the current body.
-  SellOrganicData   — moves completed species from REMAINING → SCANNED.
+  ScanOrganic       — adds / updates a species row for the given system+body.
+  SellOrganicData   — clears all accumulated data (data submitted to Vista Genomics).
   CodexEntry        — no widget update; logged for future codex panel.
 """
 from __future__ import annotations
 
-import queue
 import tkinter as tk
 from tkinter import ttk
 
@@ -46,14 +75,16 @@ from client.roles.base_panel import BasePanel
 from client.roles.bioscan_table import BioScanTable, BG, HEADER_BG, HEADER_FG, FONT_BOLD
 from shared.roles_def import Role
 
-# Credits per species scan step (minimum; actual value varies by species).
-# The panel uses 0 until the agent sends a real value.
-_UNKNOWN_VALUE = "?"
-
-# How many scan steps are required to complete a species
 _SCANS_REQUIRED = 3
 
-# Format helpers
+# Map scan_type string (from journal / snapshot) to completed scan count
+_SCAN_TYPE_COUNT: dict[str, int] = {
+    "Log":     1,
+    "Sample":  2,
+    "Analyse": 3,
+}
+
+
 def _fmt_cr(value: int) -> str:
     return f"{value:,}" if value else "0"
 
@@ -99,15 +130,17 @@ class ExobiologyPanel(BasePanel):
         self._table.pack(fill="both", expand=True)
 
         # ── Internal state ────────────────────────────────────────────────
-        # body_name → {"remaining_cr": int, "scanned_cr": int, "species": dict[str→_SpeciesState]}
-        self._bodies: dict[str, dict] = {}
+        # system → body → {remaining_cr, scanned_cr, species: dict[name→state]}
+        self._systems: dict[str, dict[str, dict]] = {}
         self._total_remaining: int = 0
         self._total_earned:    int = 0
 
     # ── Event dispatch ─────────────────────────────────────────────────────
 
     def on_event(self, event: str, data: dict) -> None:
-        if event == "ScanOrganic":
+        if event == "StateSnapshot":
+            self._load_snapshot(data)
+        elif event == "ScanOrganic":
             self._on_scan_organic(data)
         elif event == "SellOrganicData":
             self._on_sell_organic(data)
@@ -116,24 +149,28 @@ class ExobiologyPanel(BasePanel):
     # ── Internal handlers ──────────────────────────────────────────────────
 
     def _on_scan_organic(self, data: dict) -> None:
-        body     = data.get("body", "Unknown body")
-        species  = data.get("species", "")
-        variant  = data.get("variant", "")
+        system    = data.get("system", "Unknown system")
+        body      = data.get("body",   "Unknown body")
+        species   = data.get("species", "")
+        variant   = data.get("variant", "")
         scan_type = data.get("scan_type", "")
-        value    = int(data.get("value", 0))
+        value     = int(data.get("value", 0))
 
         display_name = f"{species} - {variant}" if variant else species
         if not display_name:
             display_name = "UNIDENTIFIED (needs DSS scan)"
 
-        if body not in self._bodies:
-            self._bodies[body] = {
+        # Ensure nested structure exists
+        if system not in self._systems:
+            self._systems[system] = {}
+        if body not in self._systems[system]:
+            self._systems[system][body] = {
                 "remaining_cr": 0,
                 "scanned_cr":   0,
                 "species":      {},
             }
 
-        body_entry = self._bodies[body]
+        body_entry = self._systems[system][body]
         sp_key = display_name
 
         if sp_key not in body_entry["species"]:
@@ -152,14 +189,57 @@ class ExobiologyPanel(BasePanel):
 
     def _on_sell_organic(self, data: dict) -> None:
         self._total_earned += int(data.get("total_value", 0))
+        # All data submitted — clear everything
+        self._systems.clear()
+        self._rebuild_table()
 
-        # Mark all fully-scanned species as sold
-        for item in data.get("items", []):
-            sp_name = item.get("species", "")
-            for body_entry in self._bodies.values():
-                for key, sp in body_entry["species"].items():
-                    if sp_name and sp_name in key:
-                        sp["sold"] = True
+    def _load_snapshot(self, data: dict) -> None:
+        """
+        Pre-populate the panel from a StateSnapshot sent by the agent on connect.
+
+        Replaces any existing in-memory state completely.  The snapshot format
+        mirrors the agent's serialised ``_systems`` structure::
+
+            {
+              "systems": {
+                "<system>": {
+                  "<body>": [
+                    {"species": "...", "variant": "...",
+                     "scan_type": "Log"|"Sample"|"Analyse", "value": <int>},
+                    ...
+                  ]
+                }
+              }
+            }
+        """
+        self._systems.clear()
+        for sys_name, bodies in data.get("systems", {}).items():
+            for body_name, scans in bodies.items():
+                for record in scans:
+                    species   = record.get("species", "")
+                    variant   = record.get("variant", "")
+                    scan_type = record.get("scan_type", "")
+                    value     = int(record.get("value", 0))
+
+                    display_name = f"{species} - {variant}" if variant else species
+                    if not display_name:
+                        display_name = "UNIDENTIFIED (needs DSS scan)"
+
+                    if sys_name not in self._systems:
+                        self._systems[sys_name] = {}
+                    if body_name not in self._systems[sys_name]:
+                        self._systems[sys_name][body_name] = {
+                            "remaining_cr": 0,
+                            "scanned_cr":   0,
+                            "species":      {},
+                        }
+
+                    scan_count = _SCAN_TYPE_COUNT.get(scan_type, 1)
+                    self._systems[sys_name][body_name]["species"][display_name] = {
+                        "scan_count": scan_count,
+                        "value":      value,
+                        "sold":       False,
+                    }
 
         self._rebuild_table()
 
@@ -169,41 +249,59 @@ class ExobiologyPanel(BasePanel):
         table_data = []
         total_remaining = 0
 
-        for body_name, bentry in self._bodies.items():
-            body_remaining = 0
-            body_scanned   = 0
-            species_rows   = []
+        for sys_name, bodies in self._systems.items():
+            sys_remaining = 0
+            sys_scanned   = 0
+            body_rows     = []
 
-            for sp_name, sp in bentry["species"].items():
-                done     = sp["scan_count"] >= _SCANS_REQUIRED
-                gc_done  = done and sp["sold"]
-                val      = sp["value"]
+            for body_name, bentry in bodies.items():
+                body_remaining = 0
+                body_scanned   = 0
+                species_rows   = []
 
-                remaining_cr = val if (done and not sp["sold"]) else 0
-                scanned_cr   = val if sp["sold"] else 0
-                hist         = str(sp["scan_count"])
+                for sp_name, sp in bentry["species"].items():
+                    done    = sp["scan_count"] >= _SCANS_REQUIRED
+                    gc_done = done and sp["sold"]
+                    val     = sp["value"]
 
-                if not done:
-                    remaining_cr = val if val else 0
+                    if done and not sp["sold"]:
+                        remaining_cr = val
+                        scanned_cr   = 0
+                    elif sp["sold"]:
+                        remaining_cr = 0
+                        scanned_cr   = val
+                    else:
+                        remaining_cr = val if val else 0
+                        scanned_cr   = 0
 
-                body_remaining += remaining_cr
-                body_scanned   += scanned_cr
-                total_remaining += remaining_cr
+                    body_remaining  += remaining_cr
+                    body_scanned    += scanned_cr
+                    total_remaining += remaining_cr
 
-                species_rows.append({
-                    "name":         sp_name,
-                    "remaining_cr": _fmt_cr(remaining_cr) if remaining_cr else "",
-                    "scanned_cr":   _fmt_cr(scanned_cr)   if scanned_cr   else "",
-                    "hist":         hist,
-                    "done":         "Y" if done else "",
-                    "gc":           gc_done,
+                    species_rows.append({
+                        "name":         sp_name,
+                        "remaining_cr": _fmt_cr(remaining_cr) if remaining_cr else "",
+                        "scanned_cr":   _fmt_cr(scanned_cr)   if scanned_cr   else "",
+                        "hist":         str(sp["scan_count"]),
+                        "done":         "Y" if done else "",
+                        "gc":           gc_done,
+                    })
+
+                sys_remaining += body_remaining
+                sys_scanned   += body_scanned
+
+                body_rows.append({
+                    "body":         body_name,
+                    "remaining_cr": _fmt_cr(body_remaining),
+                    "scanned_cr":   _fmt_cr(body_scanned),
+                    "species":      species_rows,
                 })
 
             table_data.append({
-                "body":         body_name,
-                "remaining_cr": _fmt_cr(body_remaining) if body_remaining else "0",
-                "scanned_cr":   _fmt_cr(body_scanned)   if body_scanned   else "0",
-                "species":      species_rows,
+                "system":       sys_name,
+                "remaining_cr": _fmt_cr(sys_remaining),
+                "scanned_cr":   _fmt_cr(sys_scanned),
+                "bodies":       body_rows,
             })
 
         self._total_remaining = total_remaining

@@ -87,3 +87,24 @@ class BaseRole(ABC):
             or ``None`` to suppress broadcast for this role.
         """
         return None
+
+    def get_snapshot(self) -> dict | None:
+        """
+        Return the current accumulated role state as a snapshot payload.
+
+        Called by the agent when a new client connects so the panel can
+        be pre-populated without waiting for the next live journal event.
+
+        The returned dict becomes ``EventMessage.data`` for a synthetic
+        ``EventMessage(event="StateSnapshot")``.
+
+        The default implementation returns ``None`` (no snapshot — roles
+        that are purely reactive and hold no persistent state can rely on
+        the default).  Override in stateful roles such as Exobiology.
+
+        Returns
+        -------
+        dict | None
+            Snapshot payload, or ``None`` to skip the initial push.
+        """
+        return None

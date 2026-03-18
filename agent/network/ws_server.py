@@ -105,21 +105,31 @@ class WSServer:
 
     def __init__(
         self,
-        host:            str,
-        port:            int,
-        client_registry: ClientRegistry,
-        action_callback: Optional[Callable[[str, str, str], None]] = None,
+        host:             str,
+        port:             int,
+        client_registry:  ClientRegistry,
+        action_callback:  Optional[Callable[[str, str, str], None]] = None,
+        connect_callback: Optional[Callable] = None,
         ssl_context=None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        connect_callback : async callable(client_id, roles), optional
+            Awaited immediately after a client completes the handshake and is
+            added to ``_connections``.  Use this to push initial state snapshots.
+            Signature: ``async def cb(client_id: str, roles: list[str]) -> None``
+        """
         if not _WS_OK:
             raise RuntimeError(
                 "websockets is required.  Install with:  pip install websockets"
             )
-        self.host     = host
-        self.port     = port
-        self._registry = client_registry
-        self._action_cb = action_callback
-        self._ssl      = ssl_context
+        self.host         = host
+        self.port         = port
+        self._registry    = client_registry
+        self._action_cb   = action_callback
+        self._connect_cb  = connect_callback
+        self._ssl         = ssl_context
 
         self._connections: dict[str, _ConnectedClient] = {}   # client_id → conn
         self._lock        = asyncio.Lock()
@@ -189,6 +199,23 @@ class WSServer:
         except Exception:
             pass
 
+    async def send_to_client(self, client_id: str, message: dict) -> None:
+        """
+        Send a single message dict to one specific connected client.
+
+        Used by the connect_callback to push initial state snapshots.
+        Silently no-ops if the client is not (or no longer) connected.
+        """
+        payload = json.dumps(message)
+        async with self._lock:
+            conn = self._connections.get(client_id)
+        if conn is None:
+            return
+        try:
+            await conn.ws.send(payload)
+        except Exception:
+            pass
+
     # ── Connection handler ─────────────────────────────────────────────────
 
     async def _handle_connection(
@@ -211,6 +238,14 @@ class WSServer:
             datetime.now(timezone.utc).isoformat(),
         )
         log.info("Client connected: %s  roles=%s", conn.client_id, conn.roles)
+
+        # ── 1b. Initial state snapshot push ──────────────────────────────
+        if self._connect_cb:
+            try:
+                await self._connect_cb(conn.client_id, conn.roles)
+            except Exception as exc:
+                log.warning("connect_callback raised for %s: %s",
+                            conn.client_id, exc)
 
         # ── 2. Message loop ───────────────────────────────────────────────
         try:

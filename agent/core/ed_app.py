@@ -58,6 +58,8 @@ from agent.network.client_registry import ClientRegistry
 from agent.network.ws_server import WSServer
 from agent.roles import get_role, all_role_names
 from agent.security.tls_setup import ensure_cert, build_server_ssl_context
+from datetime import datetime, timezone
+
 from shared.messages import EventMessage
 from shared.roles_def import ALL_ROLES
 
@@ -382,13 +384,46 @@ class EDApp:
 
     async def _start_ws_server(self) -> None:
         self._ws_server = WSServer(
-            host            = self._ws_host,
-            port            = self._ws_port,
-            client_registry = self._registry,
-            action_callback = self._on_action_received,
-            ssl_context     = self._ssl,
+            host             = self._ws_host,
+            port             = self._ws_port,
+            client_registry  = self._registry,
+            action_callback  = self._on_action_received,
+            connect_callback = self._on_client_connected,
+            ssl_context      = self._ssl,
         )
         await self._ws_server.start()
+
+    async def _on_client_connected(
+        self, client_id: str, roles: list[str]
+    ) -> None:
+        """
+        Called by WSServer immediately after a client completes its handshake.
+
+        Iterates the client's assigned roles and, for each role that has
+        accumulated state, sends a synthetic ``StateSnapshot`` EventMessage
+        directly to that client so its panels pre-populate immediately.
+        """
+        if self._ws_server is None:
+            return
+        timestamp = datetime.now(timezone.utc).isoformat()
+        for role_name in roles:
+            role = self._roles.get(role_name)
+            if role is None:
+                continue
+            snapshot = role.get_snapshot()
+            if snapshot is None:
+                continue
+            msg = EventMessage(
+                role      = role_name,
+                event     = "StateSnapshot",
+                timestamp = timestamp,
+                data      = snapshot,
+            )
+            await self._ws_server.send_to_client(client_id, msg.to_dict())
+            log.info(
+                "Sent StateSnapshot for role=%r to client=%s",
+                role_name, client_id,
+            )
 
     async def _stop_ws_server(self) -> None:
         if self._ws_server:
