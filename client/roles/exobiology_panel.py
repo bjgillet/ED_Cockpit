@@ -181,7 +181,10 @@ class ExobiologyPanel(BasePanel):
             }
 
         sp = body_entry["species"][sp_key]
-        sp["scan_count"] = min(sp["scan_count"] + 1, _SCANS_REQUIRED)
+        # Use scan_type to determine the canonical count (idempotent against
+        # duplicate events or snapshot+live-event overlap).
+        new_count = _SCAN_TYPE_COUNT.get(scan_type, 1)
+        sp["scan_count"] = max(sp["scan_count"], new_count)
         if value:
             sp["value"] = value
 
@@ -189,8 +192,14 @@ class ExobiologyPanel(BasePanel):
 
     def _on_sell_organic(self, data: dict) -> None:
         self._total_earned += int(data.get("total_value", 0))
-        # All data submitted — clear everything
-        self._systems.clear()
+        # Mark all fully-scanned species as sold so they move from
+        # REMAINING CR to SCANNED CR (with GC marker).  Partially-scanned
+        # species (shouldn't exist at sell time) are left as-is.
+        for bodies in self._systems.values():
+            for bentry in bodies.values():
+                for sp in bentry["species"].values():
+                    if sp["scan_count"] >= _SCANS_REQUIRED:
+                        sp["sold"] = True
         self._rebuild_table()
 
     def _load_snapshot(self, data: dict) -> None:
