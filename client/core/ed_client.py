@@ -72,6 +72,14 @@ class EDClient:
         self._role_queues:    dict[str, list[queue.Queue]] = {}
         self._assigned_roles: list[str] = []
 
+        # Most-recent StateSnapshot per role.
+        # The snapshot arrives on the asyncio thread immediately after the
+        # WelcomeMessage, but panels are created up to POLL_MS later on the
+        # tkinter thread.  Caching here lets subscribe_role() replay the
+        # snapshot to any panel that subscribes after the event was dispatched.
+        # Cleared on every new connection so the cache never holds stale data.
+        self._snapshot_cache: dict[str, dict] = {}
+
         # status queue — consumed by the connection-status indicator
         self._status_queues:  list[queue.Queue] = []
 
@@ -109,10 +117,19 @@ class EDClient:
 
         Returns a ``queue.Queue`` that receives dicts:
             {"event": "<event_name>", "data": {...}}
+
+        If a ``StateSnapshot`` for this role was already received (i.e. it
+        arrived before the panel was created), it is placed on the queue
+        immediately so the panel pre-populates without waiting for the next
+        live journal event.
         """
         q: queue.Queue = queue.Queue()
         with self._lock:
             self._role_queues.setdefault(role, []).append(q)
+            cached_snapshot = self._snapshot_cache.get(role)
+        if cached_snapshot is not None:
+            q.put({"event": "StateSnapshot", "data": cached_snapshot})
+            log.debug("EDClient: replayed cached StateSnapshot for role=%r", role)
         return q
 
     def unsubscribe_role(self, role: str, q: queue.Queue) -> None:
@@ -213,6 +230,9 @@ class EDClient:
     def _on_connected(self, assigned_roles: list[str]) -> None:
         with self._lock:
             self._assigned_roles = list(assigned_roles)
+            # Fresh connection — discard any snapshot cached from the previous
+            # session so panels always reflect the agent's current state.
+            self._snapshot_cache.clear()
         self._push_status({"status": "connected", "roles": assigned_roles})
         log.info("EDClient connected — roles: %s", assigned_roles)
 
@@ -282,6 +302,13 @@ class EDClient:
 
     def _dispatch_event(self, role: str, event: str, data: dict) -> None:
         with self._lock:
+            if event == "StateSnapshot":
+                # Cache so subscribe_role() can replay it to late-subscribing panels
+                self._snapshot_cache[role] = data
+            elif event == "SellOrganicData":
+                # Agent cleared all data — invalidate any cached snapshot so a
+                # freshly-created panel starts empty rather than showing stale data
+                self._snapshot_cache.pop(role, None)
             queues = list(self._role_queues.get(role, []))
         payload = {"event": event, "data": data}
         for q in queues:
