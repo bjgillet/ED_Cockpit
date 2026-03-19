@@ -67,7 +67,7 @@ SAMPLE_DATA = [
         "scanned_cr":   "1,849,000",
         "bodies": [
             {
-                "body":         "AB 3 a",
+                "body":         "Flyooe Hypue AA-A h0 AB 3 a",
                 "remaining_cr": "1,849,000",
                 "scanned_cr":   "1,849,000",
                 "ff":           True,
@@ -194,11 +194,17 @@ class BioScanTable(tk.Frame):
                 open=True,
             )
 
+            sys_name = system["system"]
             for body in system.get("bodies", []):
-                ff_mark  = " ⭐" if body.get("ff") else ""
+                # Strip the system name prefix that ED includes in body names
+                # e.g. "Flyooe Hypue AA-A h0 AB 3 a" → "AB 3 a"
+                raw_body = body["body"]
+                body_label = (raw_body[len(sys_name):].lstrip()
+                              if raw_body.startswith(sys_name) else raw_body)
+                ff_mark    = " (FIRST FOOTFALL)" if body.get("ff") else ""
                 body_id = self.tree.insert(
                     sys_id, "end",
-                    text=body["body"] + ff_mark,
+                    text=body_label + ff_mark,
                     values=(
                         "",
                         body.get("remaining_cr", ""),
