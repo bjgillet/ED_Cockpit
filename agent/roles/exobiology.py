@@ -8,6 +8,12 @@ Events handled
 --------------
   ApproachBody      — player approaches a landable body; used to track the
                       current body name and system (not forwarded to clients).
+  Disembark         — player steps off ship/SRV onto a planet surface.
+                      Forwarded only when ``FirstFootfall`` is ``true`` in the
+                      journal entry (i.e. the player is the first commander
+                      to set foot on this body galaxy-wide).  The game server
+                      resolves any multi-player race condition authoritatively,
+                      so this event is the only reliable source of truth.
   ScanOrganic       — player performed one scan step on an organic sample.
                       Each species requires 3 scans; the ``ScanType`` field
                       distinguishes Log (1st), Sample (2nd), and Analyse (3rd).
@@ -40,8 +46,14 @@ State persistence
           ]
         }
       },
+      "first_footfalls": {
+        "<system name>": ["<body name>", ...]
+      },
       "last_updated": "<ISO-8601 UTC>"
     }
+
+  ``first_footfalls`` is **never** cleared by ``SellOrganicData``; it is a
+  permanent record of bodies where the player achieved first footfall.
 
   Backward compatibility: old single-system files (with top-level ``system``,
   ``body``, ``scans`` keys) are automatically migrated on first load.
@@ -106,6 +118,14 @@ Wire payload shapes
       "body":    "<body>",
       "signals": [ ... ],
     }
+
+  FirstFootfall →
+    {
+      "event":   "FirstFootfall",
+      "system":  "<system name>",
+      "body":    "<body name>",
+      "body_id": <int | null>,
+    }
 """
 from __future__ import annotations
 
@@ -134,6 +154,7 @@ class ExobiologyRole(BaseRole):
     name = Role.EXOBIOLOGY
     journal_events = frozenset({
         "ApproachBody",
+        "Disembark",
         "ScanOrganic",
         "SellOrganicData",
         "CodexEntry",
@@ -154,6 +175,10 @@ class ExobiologyRole(BaseRole):
         # Multi-system scan accumulator:
         #   system_name → body_name → species_display_name → scan_record
         self._systems: dict[str, dict[str, dict[str, dict]]] = {}
+
+        # First-footfall registry: system_name → [body_name, ...]
+        # Permanent — never cleared by SellOrganicData.
+        self._first_footfalls: dict[str, list[str]] = {}
 
         # Value resolver: seed → user cache → async API fallback
         self._value_lookup = ValueLookup(cache_dir=self._config_dir)
@@ -215,6 +240,8 @@ class ExobiologyRole(BaseRole):
                         for item in scans
                         if item.get("species")
                     }
+            for sys_name, bodies in saved.get("first_footfalls", {}).items():
+                self._first_footfalls[sys_name] = list(bodies)
             log.info("ExobiologyRole: multi-system state loaded from %s", self._state_path)
             return
 
@@ -259,6 +286,7 @@ class ExobiologyRole(BaseRole):
                 "current_body":    self._body_name,
                 "current_body_id": self._body_id,
                 "systems":         serialised_systems,
+                "first_footfalls": dict(self._first_footfalls),
                 "last_updated":    datetime.now(timezone.utc).isoformat(),
             }
             self._state_path.write_text(
@@ -289,10 +317,13 @@ class ExobiologyRole(BaseRole):
                     ...
                   ]
                 }
+              },
+              "first_footfalls": {
+                "<system>": ["<body>", ...]
               }
             }
         """
-        if not self._systems:
+        if not self._systems and not self._first_footfalls:
             return None
         serialised: dict = {}
         for sys_name, bodies in self._systems.items():
@@ -300,7 +331,10 @@ class ExobiologyRole(BaseRole):
                 body_name: list(species_map.values())
                 for body_name, species_map in bodies.items()
             }
-        return {"systems": serialised}
+        return {
+            "systems":        serialised,
+            "first_footfalls": dict(self._first_footfalls),
+        }
 
     def filter(self, event_name: str, data: dict) -> dict | None:
         if event_name == "ApproachBody":
@@ -309,6 +343,8 @@ class ExobiologyRole(BaseRole):
             self._system    = data.get("StarSystem", "")
             self._save_state()
             return None   # not forwarded to clients
+        if event_name == "Disembark":
+            return self._handle_disembark(data)
         if event_name == "ScanOrganic":
             return self._handle_scan_organic(data)
         if event_name == "SellOrganicData":
@@ -322,6 +358,28 @@ class ExobiologyRole(BaseRole):
         return None
 
     # ── Event handlers ─────────────────────────────────────────────────────
+
+    def _handle_disembark(self, data: dict) -> dict | None:
+        """Forward only confirmed first-footfall disembark events."""
+        if not data.get("OnPlanet") or not data.get("FirstFootfall"):
+            return None
+
+        system  = data.get("StarSystem", self._system)
+        body    = data.get("Body",       self._body_name)
+        body_id = data.get("BodyID",     self._body_id)
+
+        bodies = self._first_footfalls.setdefault(system, [])
+        if body not in bodies:
+            bodies.append(body)
+        self._save_state()
+        log.info("ExobiologyRole: first footfall on %s / %s", system, body)
+
+        return {
+            "event":   "FirstFootfall",
+            "system":  system,
+            "body":    body,
+            "body_id": body_id,
+        }
 
     def _handle_scan_organic(self, data: dict) -> dict:
         species   = data.get("Species_Localised") or data.get("Species", "")

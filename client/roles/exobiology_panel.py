@@ -139,6 +139,9 @@ class ExobiologyPanel(BasePanel):
         # ── Internal state ────────────────────────────────────────────────
         # system → body → {remaining_cr, scanned_cr, species: dict[name→state]}
         self._systems: dict[str, dict[str, dict]] = {}
+        # Permanent first-footfall registry: system → set of body names.
+        # Never cleared on SellOrganicData.
+        self._first_footfalls: dict[str, set[str]] = {}
         self._total_remaining: int = 0
         self._total_scanned:   int = 0
         self._total_earned:    int = 0
@@ -152,6 +155,8 @@ class ExobiologyPanel(BasePanel):
             self._on_scan_organic(data)
         elif event == "SellOrganicData":
             self._on_sell_organic(data)
+        elif event == "FirstFootfall":
+            self._on_first_footfall(data)
         # CodexEntry: no widget update in this panel
 
     # ── Internal handlers ──────────────────────────────────────────────────
@@ -198,6 +203,13 @@ class ExobiologyPanel(BasePanel):
 
         self._rebuild_table()
 
+    def _on_first_footfall(self, data: dict) -> None:
+        system = data.get("system", "")
+        body   = data.get("body",   "")
+        if system and body:
+            self._first_footfalls.setdefault(system, set()).add(body)
+            self._rebuild_table()
+
     def _on_sell_organic(self, data: dict) -> None:
         self._total_earned += int(data.get("total_value", 0))
         # Mark all fully-scanned species as sold so they move from
@@ -230,6 +242,9 @@ class ExobiologyPanel(BasePanel):
             }
         """
         self._systems.clear()
+        # Merge first_footfalls from snapshot (don't discard live FFs already received).
+        for sys_name, bodies in data.get("first_footfalls", {}).items():
+            self._first_footfalls.setdefault(sys_name, set()).update(bodies)
         for sys_name, bodies in data.get("systems", {}).items():
             for body_name, scans in bodies.items():
                 for record in scans:
@@ -312,11 +327,13 @@ class ExobiologyPanel(BasePanel):
                 sys_remaining += body_remaining
                 sys_scanned   += body_scanned
 
+                ff = body_name in self._first_footfalls.get(sys_name, set())
                 body_rows.append({
                     "body":         body_name,
                     "remaining_cr": _fmt_cr(body_remaining),
                     "scanned_cr":   _fmt_cr(body_scanned),
                     "species":      species_rows,
+                    "ff":           ff,
                 })
 
             table_data.append({
