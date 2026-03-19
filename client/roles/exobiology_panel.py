@@ -118,6 +118,13 @@ class ExobiologyPanel(BasePanel):
                                        font=("Consolas", 9))
         self._lbl_remaining.pack(side="left", padx=(0, 16))
 
+        tk.Label(totals, text="SCANNED:", bg="#10102a", fg="#4da6ff",
+                 font=("Consolas", 9, "bold")).pack(side="left", padx=(0, 2))
+        self._lbl_scanned = tk.Label(totals, text="0 CR",
+                                     bg="#10102a", fg="#ffd966",
+                                     font=("Consolas", 9))
+        self._lbl_scanned.pack(side="left", padx=(0, 16))
+
         tk.Label(totals, text="EARNED:", bg="#10102a", fg="#4da6ff",
                  font=("Consolas", 9, "bold")).pack(side="left", padx=(0, 2))
         self._lbl_earned = tk.Label(totals, text="0 CR",
@@ -133,6 +140,7 @@ class ExobiologyPanel(BasePanel):
         # system → body → {remaining_cr, scanned_cr, species: dict[name→state]}
         self._systems: dict[str, dict[str, dict]] = {}
         self._total_remaining: int = 0
+        self._total_scanned:   int = 0
         self._total_earned:    int = 0
 
     # ── Event dispatch ─────────────────────────────────────────────────────
@@ -255,8 +263,9 @@ class ExobiologyPanel(BasePanel):
     # ── Table rebuild ──────────────────────────────────────────────────────
 
     def _rebuild_table(self) -> None:
-        table_data = []
+        table_data      = []
         total_remaining = 0
+        total_scanned   = 0
 
         for sys_name, bodies in self._systems.items():
             sys_remaining = 0
@@ -273,19 +282,23 @@ class ExobiologyPanel(BasePanel):
                     gc_done = done and sp["sold"]
                     val     = sp["value"]
 
-                    if done and not sp["sold"]:
-                        remaining_cr = val
-                        scanned_cr   = 0
-                    elif sp["sold"]:
+                    if sp["sold"]:
+                        # Already sold — show in scanned column with GC marker
+                        remaining_cr = 0
+                        scanned_cr   = val
+                    elif done:
+                        # 3 samples complete, not yet sold — move to scanned
                         remaining_cr = 0
                         scanned_cr   = val
                     else:
+                        # Still being scanned
                         remaining_cr = val if val else 0
                         scanned_cr   = 0
 
-                    body_remaining  += remaining_cr
-                    body_scanned    += scanned_cr
+                    body_remaining += remaining_cr
+                    body_scanned   += scanned_cr
                     total_remaining += remaining_cr
+                    total_scanned   += scanned_cr
 
                     species_rows.append({
                         "name":         sp_name,
@@ -314,6 +327,8 @@ class ExobiologyPanel(BasePanel):
             })
 
         self._total_remaining = total_remaining
+        self._total_scanned   = total_scanned
         self._table.load_data(table_data)
         self._lbl_remaining.config(text=f"{_fmt_cr(self._total_remaining)} CR")
+        self._lbl_scanned.config(text=f"{_fmt_cr(self._total_scanned)} CR")
         self._lbl_earned.config(text=f"{_fmt_cr(self._total_earned)} CR")

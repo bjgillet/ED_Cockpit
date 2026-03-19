@@ -63,16 +63,16 @@ SAMPLE_DATA = [
     },
     {
         "system":       "Flyooe Hypue AA-A h0",
-        "remaining_cr": "3,698,000",
-        "scanned_cr":   "0",
+        "remaining_cr": "1,849,000",
+        "scanned_cr":   "1,849,000",
         "bodies": [
             {
                 "body":         "AB 3 a",
-                "remaining_cr": "3,698,000",
-                "scanned_cr":   "0",
+                "remaining_cr": "1,849,000",
+                "scanned_cr":   "1,849,000",
                 "species": [
-                    {"name": "Tussock Pennula - Lime",      "remaining_cr": "1,849,000", "scanned_cr": "", "hist": "3", "done": "Y", "gc": False},
-                    {"name": "Tussock Propagito - Lime",    "remaining_cr": "1,849,000", "scanned_cr": "", "hist": "2", "done": "",  "gc": False},
+                    {"name": "Tussock Pennula - Lime",   "remaining_cr": "",          "scanned_cr": "1,849,000", "hist": "3", "done": "Y", "gc": False},
+                    {"name": "Tussock Propagito - Lime", "remaining_cr": "1,849,000", "scanned_cr": "",          "hist": "2", "done": "",  "gc": False},
                 ],
             },
         ],
