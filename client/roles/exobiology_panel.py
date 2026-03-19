@@ -288,6 +288,11 @@ class ExobiologyPanel(BasePanel):
             body_rows     = []
 
             for body_name, bentry in bodies.items():
+                # First Footfall confirmed for this body → x5 sale multiplier.
+                # Applied to display values only; raw values in _systems stay clean.
+                ff      = body_name in self._first_footfalls.get(sys_name, set())
+                ff_mult = 5 if ff else 1
+
                 body_remaining = 0
                 body_scanned   = 0
                 species_rows   = []
@@ -295,7 +300,7 @@ class ExobiologyPanel(BasePanel):
                 for sp_name, sp in bentry["species"].items():
                     done    = sp["scan_count"] >= _SCANS_REQUIRED
                     gc_done = done and sp["sold"]
-                    val     = sp["value"]
+                    val     = sp["value"] * ff_mult
 
                     if sp["sold"]:
                         # Already sold — show in scanned column with GC marker
@@ -310,8 +315,8 @@ class ExobiologyPanel(BasePanel):
                         remaining_cr = val if val else 0
                         scanned_cr   = 0
 
-                    body_remaining += remaining_cr
-                    body_scanned   += scanned_cr
+                    body_remaining  += remaining_cr
+                    body_scanned    += scanned_cr
                     total_remaining += remaining_cr
                     total_scanned   += scanned_cr
 
@@ -327,7 +332,6 @@ class ExobiologyPanel(BasePanel):
                 sys_remaining += body_remaining
                 sys_scanned   += body_scanned
 
-                ff = body_name in self._first_footfalls.get(sys_name, set())
                 body_rows.append({
                     "body":         body_name,
                     "remaining_cr": _fmt_cr(body_remaining),
