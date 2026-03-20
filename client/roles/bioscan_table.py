@@ -216,7 +216,11 @@ class BioScanTable(tk.Frame):
                 )
 
                 for sp in body.get("species", []):
-                    unidentified = "UNIDENTIFIED" in sp["name"]
+                    unidentified = (
+                        "UNIDENTIFIED" in sp["name"]
+                        or "UNKNOWN" in sp["name"]
+                        or sp.get("placeholder", False)
+                    )
                     tag = "unidentified" if unidentified else "child"
                     gc_symbol = "⬛" if sp.get("gc") else ""
 

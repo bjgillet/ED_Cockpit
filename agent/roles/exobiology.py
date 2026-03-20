@@ -155,11 +155,13 @@ class ExobiologyRole(BaseRole):
     journal_events = frozenset({
         "ApproachBody",
         "Disembark",
+        "FSDJump",       # track current system name (FSSBodySignals lacks StarSystem)
+        "FSSBodySignals",
+        "Location",      # track current system name on game load
+        "SAASignalsFound",
         "ScanOrganic",
         "SellOrganicData",
         "CodexEntry",
-        "SAASignalsFound",
-        "FSSBodySignals",
     })
 
     def __init__(self) -> None:
@@ -179,6 +181,14 @@ class ExobiologyRole(BaseRole):
         # First-footfall registry: system_name → [body_name, ...]
         # Permanent — never cleared by SellOrganicData.
         self._first_footfalls: dict[str, list[str]] = {}
+
+        # FSS bio signal counts: system_name → body_name → count
+        # Lets the snapshot pre-populate UNKNOWN placeholder rows on the client.
+        self._fss_counts: dict[str, dict[str, int]] = {}
+
+        # SAA genus lists: system_name → body_name → [genus_localised, ...]
+        # Lets the snapshot pre-populate genus placeholder rows on the client.
+        self._saa_genera: dict[str, dict[str, list[str]]] = {}
 
         # Value resolver: seed → user cache → async API fallback
         self._value_lookup = ValueLookup(cache_dir=self._config_dir)
@@ -242,6 +252,10 @@ class ExobiologyRole(BaseRole):
                     }
             for sys_name, bodies in saved.get("first_footfalls", {}).items():
                 self._first_footfalls[sys_name] = list(bodies)
+            for sys_name, bodies in saved.get("fss_counts", {}).items():
+                self._fss_counts[sys_name] = dict(bodies)
+            for sys_name, bodies in saved.get("saa_genera", {}).items():
+                self._saa_genera[sys_name] = {b: list(g) for b, g in bodies.items()}
             log.info("ExobiologyRole: multi-system state loaded from %s", self._state_path)
             return
 
@@ -287,6 +301,8 @@ class ExobiologyRole(BaseRole):
                 "current_body_id": self._body_id,
                 "systems":         serialised_systems,
                 "first_footfalls": dict(self._first_footfalls),
+                "fss_counts":      dict(self._fss_counts),
+                "saa_genera":      {s: dict(b) for s, b in self._saa_genera.items()},
                 "last_updated":    datetime.now(timezone.utc).isoformat(),
             }
             self._state_path.write_text(
@@ -323,7 +339,8 @@ class ExobiologyRole(BaseRole):
               }
             }
         """
-        if not self._systems and not self._first_footfalls:
+        if not any([self._systems, self._first_footfalls,
+                    self._fss_counts, self._saa_genera]):
             return None
         serialised: dict = {}
         for sys_name, bodies in self._systems.items():
@@ -332,15 +349,21 @@ class ExobiologyRole(BaseRole):
                 for body_name, species_map in bodies.items()
             }
         return {
-            "systems":        serialised,
+            "systems":         serialised,
             "first_footfalls": dict(self._first_footfalls),
+            "fss_counts":      dict(self._fss_counts),
+            "saa_genera":      {s: dict(b) for s, b in self._saa_genera.items()},
         }
 
     def filter(self, event_name: str, data: dict) -> dict | None:
+        if event_name in ("FSDJump", "Location"):
+            # Keep _system current so FSSBodySignals/SAASignalsFound can fall back to it
+            self._system = data.get("StarSystem", self._system)
+            return None   # not forwarded to clients
         if event_name == "ApproachBody":
             self._body_name = data.get("Body", "")
             self._body_id   = data.get("BodyID")
-            self._system    = data.get("StarSystem", "")
+            self._system    = data.get("StarSystem", self._system)
             self._save_state()
             return None   # not forwarded to clients
         if event_name == "Disembark":
@@ -446,21 +469,48 @@ class ExobiologyRole(BaseRole):
         }
 
     def _handle_FSSBodySignals(self, data: dict) -> dict | None:
+        system  = data.get("StarSystem", "") or self._system
+        body    = data.get("BodyName", "")
         signals = data.get("Signals", [])
+
+        bio_count = next(
+            (int(s.get("Count", 0)) for s in signals
+             if s.get("Type_Localised") == "Biological"),
+            0,
+        )
+        if bio_count > 0 and system and body:
+            self._fss_counts.setdefault(system, {})[body] = bio_count
+            self._save_state()
+
         return {
             "event":   "FSSBodySignals",
-            "system":  data.get("StarSystem", ""),
-            "body":    data.get("BodyName", ""),
+            "system":  system,
+            "body":    body,
             "signals": signals,
         }
 
     def _handle_SAASignalsFound(self, data: dict) -> dict | None:
+        system  = data.get("StarSystem", "") or self._system
+        body    = data.get("BodyName", "")
         signals = data.get("Signals", [])
+
+        # Normalise genus list (Genus_Localised preferred over internal key)
+        genera = [
+            g.get("Genus_Localised") or g.get("Genus", "")
+            for g in data.get("Genuses", [])
+        ]
+        genera = [g for g in genera if g]
+
+        if genera and system and body:
+            self._saa_genera.setdefault(system, {})[body] = genera
+            self._save_state()
+
         return {
             "event":   "SAASignalsFound",
-            "system":  data.get("StarSystem", ""),
-            "body":    data.get("BodyName", ""),
+            "system":  system,
+            "body":    body,
             "signals": signals,
+            "genuses": [{"genus_localised": g} for g in genera],
         }
 
     @staticmethod

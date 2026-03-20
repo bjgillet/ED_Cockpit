@@ -151,6 +151,10 @@ class ExobiologyPanel(BasePanel):
     def on_event(self, event: str, data: dict) -> None:
         if event == "StateSnapshot":
             self._load_snapshot(data)
+        elif event == "FSSBodySignals":
+            self._on_fss_body_signals(data)
+        elif event == "SAASignalsFound":
+            self._on_saa_signals_found(data)
         elif event == "ScanOrganic":
             self._on_scan_organic(data)
         elif event == "SellOrganicData":
@@ -169,11 +173,12 @@ class ExobiologyPanel(BasePanel):
         scan_type = data.get("scan_type", "")
         value     = int(data.get("value", 0))
 
-        display_name = f"{species} - {variant}" if variant else species
-        if not display_name:
-            display_name = "UNIDENTIFIED (needs DSS scan)"
+        # Genus (first word of species name) is the stable slot key.
+        # SPECIES column shows only the variant (req 3).
+        genus        = species.split()[0] if species else ""
+        display_name = variant or genus or " UNKNOWN"
+        sp_key       = genus if genus else display_name
 
-        # Ensure nested structure exists
         if system not in self._systems:
             self._systems[system] = {}
         if body not in self._systems[system]:
@@ -184,23 +189,143 @@ class ExobiologyPanel(BasePanel):
             }
 
         body_entry = self._systems[system][body]
-        sp_key = display_name
 
         if sp_key not in body_entry["species"]:
-            body_entry["species"][sp_key] = {
-                "scan_count": 0,
-                "value":      value,
-                "sold":       False,
-            }
+            # Promote an UNKNOWN placeholder if one exists; otherwise create fresh.
+            unknown_key = next(
+                (k for k in body_entry["species"] if k.startswith("__slot_")),
+                None,
+            )
+            if unknown_key:
+                body_entry["species"][sp_key] = body_entry["species"].pop(unknown_key)
+            else:
+                body_entry["species"][sp_key] = {
+                    "display_name": display_name,
+                    "genus":        genus,
+                    "scan_count":   0,
+                    "value":        0,
+                    "sold":         False,
+                }
 
         sp = body_entry["species"][sp_key]
-        # Use scan_type to determine the canonical count (idempotent against
-        # duplicate events or snapshot+live-event overlap).
+        sp["display_name"] = display_name
+        sp["genus"]        = genus
+        # scan_type encodes progress exactly — idempotent against duplicate events.
         new_count = _SCAN_TYPE_COUNT.get(scan_type, 1)
-        sp["scan_count"] = max(sp["scan_count"], new_count)
+        sp["scan_count"] = max(sp.get("scan_count", 0), new_count)
         if value:
             sp["value"] = value
 
+        self._rebuild_table()
+
+    def _on_fss_body_signals(self, data: dict) -> None:
+        """
+        Create UNKNOWN placeholder rows only when the system is completely
+        absent from the table (FSS gives count but no species identity yet).
+        """
+        system  = data.get("system", "")
+        body    = data.get("body", "")
+        signals = data.get("signals", [])
+        if not system or not body:
+            return
+        if system in self._systems:
+            return  # system already has richer data — don't overwrite
+        bio_count = next(
+            (int(s.get("Count", 0)) for s in signals
+             if s.get("Type_Localised") == "Biological"),
+            0,
+        )
+        if not bio_count:
+            return
+        self._systems[system] = {
+            body: {
+                "remaining_cr": 0,
+                "scanned_cr":   0,
+                "species": {
+                    f"__slot_{i}__": {
+                        "display_name": " UNKNOWN",
+                        "genus":        "",
+                        "scan_count":   0,
+                        "value":        0,
+                        "sold":         False,
+                    }
+                    for i in range(bio_count)
+                },
+            }
+        }
+        self._rebuild_table()
+
+    def _on_saa_signals_found(self, data: dict) -> None:
+        """
+        Replace UNKNOWN placeholders with genus rows for the scanned body.
+        Existing scan data keyed by genus is preserved.
+        """
+        system  = data.get("system", "")
+        body    = data.get("body", "")
+        signals = data.get("signals", [])
+        genuses = data.get("genuses", [])
+        if not system or not body:
+            return
+        bio_count = next(
+            (int(s.get("Count", 0)) for s in signals
+             if s.get("Type_Localised") == "Biological"),
+            0,
+        )
+        if not bio_count:
+            return
+
+        # Index existing scan records by genus for merging
+        existing = (self._systems.get(system, {})
+                    .get(body, {})
+                    .get("species", {}))
+        scan_by_genus: dict[str, dict] = {
+            rec.get("genus", k): rec
+            for k, rec in existing.items()
+            if rec.get("scan_count", 0) > 0
+        }
+
+        new_species: dict[str, dict] = {}
+        for g_entry in genuses[:bio_count]:
+            genus = g_entry.get("genus_localised", "")
+            if not genus:
+                continue
+            if genus in scan_by_genus:
+                # Preserve and annotate existing scan record
+                rec = scan_by_genus[genus]
+                rec.setdefault("display_name", genus)
+                rec.setdefault("genus", genus)
+                new_species[genus] = rec
+            else:
+                new_species[genus] = {
+                    "display_name": genus,
+                    "genus":        genus,
+                    "scan_count":   0,
+                    "value":        0,
+                    "sold":         False,
+                }
+
+        # Fill remaining slots if SAA returned fewer genera than bio_count
+        for i in range(len(new_species), bio_count):
+            new_species[f"__slot_{i}__"] = {
+                "display_name": " UNKNOWN",
+                "genus":        "",
+                "scan_count":   0,
+                "value":        0,
+                "sold":         False,
+            }
+
+        # Preserve any scan records whose genus wasn't in the SAA genus list
+        for k, rec in existing.items():
+            genus = rec.get("genus", "")
+            if rec.get("scan_count", 0) > 0 and genus and genus not in new_species:
+                new_species[genus] = rec
+
+        old_body = self._systems.get(system, {}).get(body, {})
+        self._systems.setdefault(system, {})[body] = {
+            "remaining_cr": old_body.get("remaining_cr", 0),
+            "scanned_cr":   old_body.get("scanned_cr", 0),
+            "species":      new_species,
+        }
         self._rebuild_table()
 
     def _on_first_footfall(self, data: dict) -> None:
@@ -226,52 +351,92 @@ class ExobiologyPanel(BasePanel):
         """
         Pre-populate the panel from a StateSnapshot sent by the agent on connect.
 
-        Replaces any existing in-memory state completely.  The snapshot format
-        mirrors the agent's serialised ``_systems`` structure::
+        Merges three data sources in priority order:
+
+        1. ``systems``      — actual scan records (genus key, variant as display).
+        2. ``saa_genera``   — DSS genus lists; adds genus placeholders for any
+                              slot not already covered by scan data.
+        3. ``fss_counts``   — FSS bio signal counts; adds UNKNOWN placeholders
+                              only for systems that have *no* data at all.
+
+        Snapshot format (agent wire)::
 
             {
-              "systems": {
-                "<system>": {
-                  "<body>": [
-                    {"species": "...", "variant": "...",
-                     "scan_type": "Log"|"Sample"|"Analyse", "value": <int>},
-                    ...
-                  ]
-                }
-              }
+              "systems":     { "<sys>": { "<body>": [{species, variant, scan_type, value}] } },
+              "saa_genera":  { "<sys>": { "<body>": ["Bacterium", ...] } },
+              "fss_counts":  { "<sys>": { "<body>": <int> } },
+              "first_footfalls": { "<sys>": ["<body>", ...] }
             }
         """
         self._systems.clear()
-        # Merge first_footfalls from snapshot (don't discard live FFs already received).
+
+        # Always merge first_footfalls (permanent, don't discard live FFs).
         for sys_name, bodies in data.get("first_footfalls", {}).items():
             self._first_footfalls.setdefault(sys_name, set()).update(bodies)
+
+        # 1. Scan records — highest priority, genus-keyed, variant as display name.
         for sys_name, bodies in data.get("systems", {}).items():
             for body_name, scans in bodies.items():
+                body_entry = (self._systems
+                              .setdefault(sys_name, {})
+                              .setdefault(body_name, {
+                                  "remaining_cr": 0, "scanned_cr": 0, "species": {}
+                              }))
                 for record in scans:
                     species   = record.get("species", "")
                     variant   = record.get("variant", "")
                     scan_type = record.get("scan_type", "")
                     value     = int(record.get("value", 0))
+                    genus     = species.split()[0] if species else ""
+                    sp_key    = genus if genus else species
+                    display   = variant or genus or " UNKNOWN"
+                    body_entry["species"][sp_key] = {
+                        "display_name": display,
+                        "genus":        genus,
+                        "scan_count":   _SCAN_TYPE_COUNT.get(scan_type, 1),
+                        "value":        value,
+                        "sold":         False,
+                    }
 
-                    display_name = f"{species} - {variant}" if variant else species
-                    if not display_name:
-                        display_name = "UNIDENTIFIED (needs DSS scan)"
-
-                    if sys_name not in self._systems:
-                        self._systems[sys_name] = {}
-                    if body_name not in self._systems[sys_name]:
-                        self._systems[sys_name][body_name] = {
-                            "remaining_cr": 0,
-                            "scanned_cr":   0,
-                            "species":      {},
+        # 2. SAA genera — add genus placeholders not covered by scan data.
+        for sys_name, bodies in data.get("saa_genera", {}).items():
+            for body_name, genera_list in bodies.items():
+                body_species = (self._systems
+                                .setdefault(sys_name, {})
+                                .setdefault(body_name, {
+                                    "remaining_cr": 0, "scanned_cr": 0, "species": {}
+                                })
+                                ["species"])
+                for genus in genera_list:
+                    if genus and genus not in body_species:
+                        body_species[genus] = {
+                            "display_name": genus,
+                            "genus":        genus,
+                            "scan_count":   0,
+                            "value":        0,
+                            "sold":         False,
                         }
 
-                    scan_count = _SCAN_TYPE_COUNT.get(scan_type, 1)
-                    self._systems[sys_name][body_name]["species"][display_name] = {
-                        "scan_count": scan_count,
-                        "value":      value,
-                        "sold":       False,
-                    }
+        # 3. FSS counts — UNKNOWN placeholders only for wholly absent systems.
+        for sys_name, bodies in data.get("fss_counts", {}).items():
+            if sys_name in self._systems:
+                continue  # system already has richer data
+            self._systems[sys_name] = {}
+            for body_name, count in bodies.items():
+                self._systems[sys_name][body_name] = {
+                    "remaining_cr": 0,
+                    "scanned_cr":   0,
+                    "species": {
+                        f"__slot_{i}__": {
+                            "display_name": " UNKNOWN",
+                            "genus":        "",
+                            "scan_count":   0,
+                            "value":        0,
+                            "sold":         False,
+                        }
+                        for i in range(count)
+                    },
+                }
 
         self._rebuild_table()
 
@@ -297,12 +462,12 @@ class ExobiologyPanel(BasePanel):
                 body_scanned   = 0
                 species_rows   = []
 
-                for sp_name, sp in bentry["species"].items():
-                    done    = sp["scan_count"] >= _SCANS_REQUIRED
-                    gc_done = done and sp["sold"]
-                    val     = sp["value"] * ff_mult
+                for sp_key, sp in bentry["species"].items():
+                    done    = sp.get("scan_count", 0) >= _SCANS_REQUIRED
+                    gc_done = done and sp.get("sold", False)
+                    val     = sp.get("value", 0) * ff_mult
 
-                    if sp["sold"]:
+                    if sp.get("sold"):
                         # Already sold — show in scanned column with GC marker
                         remaining_cr = 0
                         scanned_cr   = val
@@ -311,7 +476,7 @@ class ExobiologyPanel(BasePanel):
                         remaining_cr = 0
                         scanned_cr   = val
                     else:
-                        # Still being scanned
+                        # Still scanning or placeholder — show potential in remaining
                         remaining_cr = val if val else 0
                         scanned_cr   = 0
 
@@ -320,13 +485,18 @@ class ExobiologyPanel(BasePanel):
                     total_remaining += remaining_cr
                     total_scanned   += scanned_cr
 
+                    # display_name introduced for genus/UNKNOWN slots; fall back
+                    # to the dict key for any records pre-dating this change.
+                    display     = sp.get("display_name", sp_key)
+                    placeholder = sp_key.startswith("__slot_")
                     species_rows.append({
-                        "name":         sp_name,
+                        "name":         display,
                         "remaining_cr": _fmt_cr(remaining_cr) if remaining_cr else "",
                         "scanned_cr":   _fmt_cr(scanned_cr)   if scanned_cr   else "",
-                        "hist":         str(sp["scan_count"]),
+                        "hist":         str(sp.get("scan_count", 0)),
                         "done":         "Y" if done else "",
                         "gc":           gc_done,
+                        "placeholder":  placeholder,
                     })
 
                 sys_remaining += body_remaining
