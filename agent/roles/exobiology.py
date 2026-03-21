@@ -29,7 +29,8 @@ State persistence
 
   Data is accumulated across **all** visited systems and bodies during an
   expedition.  Everything is cleared only when a ``SellOrganicData`` event
-  is received (player sold data at Vista Genomics).
+  is received (player sold data at Vista Genomics): ``systems``,
+  ``fss_counts`` and ``saa_genera`` are all wiped.
 
   State file format::
 
@@ -459,9 +460,13 @@ class ExobiologyRole(BaseRole):
                 "value":   int(entry.get("Value", 0)),
                 "bonus":   int(entry.get("Bonus", 0)),
             })
-        # Data sold — clear all accumulated scans across all systems
+        # Data sold — clear all accumulated expedition data across all systems.
+        # first_footfalls is intentionally preserved (permanent record).
         self._systems.clear()
+        self._fss_counts.clear()
+        self._saa_genera.clear()
         self._save_state()
+        log.info("ExobiologyRole: all expedition data cleared after SellOrganicData")
         return {
             "event":       "SellOrganicData",
             "total_value": int(data.get("TotalEarnings", 0)),

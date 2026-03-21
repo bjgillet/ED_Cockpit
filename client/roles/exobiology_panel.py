@@ -63,7 +63,8 @@ BioScanTable receives a list grouped by system:
 Events consumed
 ---------------
   ScanOrganic       — adds / updates a species row for the given system+body.
-  SellOrganicData   — clears all accumulated data (data submitted to Vista Genomics).
+  SellOrganicData   — clears all accumulated data and resets the table to empty
+                      (data submitted to Vista Genomics; EARNED total is retained).
   CodexEntry        — no widget update; logged for future codex panel.
 """
 from __future__ import annotations
@@ -336,15 +337,12 @@ class ExobiologyPanel(BasePanel):
             self._rebuild_table()
 
     def _on_sell_organic(self, data: dict) -> None:
-        self._total_earned += int(data.get("total_value", 0))
-        # Mark all fully-scanned species as sold so they move from
-        # REMAINING CR to SCANNED CR (with GC marker).  Partially-scanned
-        # species (shouldn't exist at sell time) are left as-is.
-        for bodies in self._systems.values():
-            for bentry in bodies.values():
-                for sp in bentry["species"].values():
-                    if sp["scan_count"] >= _SCANS_REQUIRED:
-                        sp["sold"] = True
+        self._total_earned  += int(data.get("total_value", 0))
+        # Data submitted to Vista Genomics — wipe all accumulated expedition
+        # data and reset the running totals so the table shows empty.
+        self._systems.clear()
+        self._total_remaining = 0
+        self._total_scanned   = 0
         self._rebuild_table()
 
     def _load_snapshot(self, data: dict) -> None:
