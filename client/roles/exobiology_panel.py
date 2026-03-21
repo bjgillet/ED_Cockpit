@@ -221,16 +221,18 @@ class ExobiologyPanel(BasePanel):
 
     def _on_fss_body_signals(self, data: dict) -> None:
         """
-        Create UNKNOWN placeholder rows only when the system is completely
-        absent from the table (FSS gives count but no species identity yet).
+        Create UNKNOWN placeholder rows for a body when it has no entry yet.
+
+        Guard is at the *body* level, not the system level, so that multiple
+        bodies in the same system each get their own placeholder rows.
         """
         system  = data.get("system", "")
         body    = data.get("body", "")
         signals = data.get("signals", [])
         if not system or not body:
             return
-        if system in self._systems:
-            return  # system already has richer data — don't overwrite
+        if body in self._systems.get(system, {}):
+            return  # body already has data (richer or placeholder) — don't overwrite
         bio_count = next(
             (int(s.get("Count", 0)) for s in signals
              if s.get("Type_Localised") == "Biological"),
@@ -238,21 +240,19 @@ class ExobiologyPanel(BasePanel):
         )
         if not bio_count:
             return
-        self._systems[system] = {
-            body: {
-                "remaining_cr": 0,
-                "scanned_cr":   0,
-                "species": {
-                    f"__slot_{i}__": {
-                        "display_name": " UNKNOWN",
-                        "genus":        "",
-                        "scan_count":   0,
-                        "value":        0,
-                        "sold":         False,
-                    }
-                    for i in range(bio_count)
-                },
-            }
+        self._systems.setdefault(system, {})[body] = {
+            "remaining_cr": 0,
+            "scanned_cr":   0,
+            "species": {
+                f"__slot_{i}__": {
+                    "display_name": " UNKNOWN",
+                    "genus":        "",
+                    "scan_count":   0,
+                    "value":        0,
+                    "sold":         False,
+                }
+                for i in range(bio_count)
+            },
         }
         self._rebuild_table()
 
