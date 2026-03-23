@@ -90,6 +90,11 @@ class BioScanTable(tk.Frame):
       • System (root row)  — gold, bold
       • Body   (child of system) — blue
       • Species (child of body)  — white / grey
+
+    Collapse state is preserved across load_data() calls.  Each system and
+    body row has a stable string key (system name, or "system::body_label")
+    stored in ``_item_key``.  ``_collapsed`` holds the keys of rows the user
+    has explicitly closed; all other rows remain open by default.
     """
 
     COLUMNS = (
@@ -104,6 +109,10 @@ class BioScanTable(tk.Frame):
     def __init__(self, parent, data: list | None = None, **kwargs):
         super().__init__(parent, bg=BG, **kwargs)
         self.data = data or []
+        # item-id → stable string key (rebuilt on every _populate)
+        self._item_key: dict[str, str] = {}
+        # keys of rows explicitly collapsed by the user (survives load_data)
+        self._collapsed: set[str] = set()
         self._setup_style()
         self._build_tree()
         self._populate()
@@ -166,6 +175,10 @@ class BioScanTable(tk.Frame):
         self.tree.tag_configure("child",        foreground=CHILD_FG,  background=BG)
         self.tree.tag_configure("unidentified", foreground=GREY_FG,   background=BG)
 
+        # Track which rows the user collapses so load_data() can restore state
+        self.tree.bind("<<TreeviewOpen>>",  self._on_row_open)
+        self.tree.bind("<<TreeviewClose>>", self._on_row_close)
+
         # Scrollbars
         vsb = ttk.Scrollbar(self, orient="vertical",   command=self.tree.yview)
         hsb = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
@@ -179,11 +192,30 @@ class BioScanTable(tk.Frame):
         self.columnconfigure(0, weight=1)
 
     # ------------------------------------------------------------------
+    def _on_row_open(self, _event) -> None:
+        key = self._item_key.get(self.tree.focus())
+        if key:
+            self._collapsed.discard(key)
+
+    def _on_row_close(self, _event) -> None:
+        key = self._item_key.get(self.tree.focus())
+        if key:
+            self._collapsed.add(key)
+
+    def clear_collapse_state(self) -> None:
+        """Reset all user-defined collapse preferences (call on full data reset)."""
+        self._collapsed.clear()
+
+    # ------------------------------------------------------------------
     def _populate(self) -> None:
+        self._item_key = {}
+
         for system in self.data:
-            sys_id = self.tree.insert(
+            sys_name = system["system"]
+            sys_key  = sys_name
+            sys_id   = self.tree.insert(
                 "", "end",
-                text=system["system"],
+                text=sys_name,
                 values=(
                     "",
                     system.get("remaining_cr", ""),
@@ -191,18 +223,19 @@ class BioScanTable(tk.Frame):
                     "", "", "",
                 ),
                 tags=("system_row",),
-                open=True,
+                open=sys_key not in self._collapsed,
             )
+            self._item_key[sys_id] = sys_key
 
-            sys_name = system["system"]
             for body in system.get("bodies", []):
                 # Strip the system name prefix that ED includes in body names
                 # e.g. "Flyooe Hypue AA-A h0 AB 3 a" → "AB 3 a"
-                raw_body = body["body"]
+                raw_body   = body["body"]
                 body_label = (raw_body[len(sys_name):].lstrip()
                               if raw_body.startswith(sys_name) else raw_body)
                 ff_mark    = " (FIRST FOOTFALL)" if body.get("ff") else ""
-                body_id = self.tree.insert(
+                body_key   = f"{sys_name}::{body_label}"
+                body_id    = self.tree.insert(
                     sys_id, "end",
                     text=body_label + ff_mark,
                     values=(
@@ -212,8 +245,9 @@ class BioScanTable(tk.Frame):
                         "", "", "",
                     ),
                     tags=("parent",),
-                    open=True,
+                    open=body_key not in self._collapsed,
                 )
+                self._item_key[body_id] = body_key
 
                 for sp in body.get("species", []):
                     unidentified = (
@@ -240,9 +274,10 @@ class BioScanTable(tk.Frame):
 
     # ------------------------------------------------------------------
     def load_data(self, data: list) -> None:
-        """Replace table content with new data."""
+        """Replace table content with new data, preserving user collapse state."""
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self._item_key = {}
         self.data = data
         self._populate()
 

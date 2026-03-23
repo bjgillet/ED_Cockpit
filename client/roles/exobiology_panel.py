@@ -343,6 +343,7 @@ class ExobiologyPanel(BasePanel):
         self._systems.clear()
         self._total_remaining = 0
         self._total_scanned   = 0
+        self._table.clear_collapse_state()
         self._rebuild_table()
 
     def _load_snapshot(self, data: dict) -> None:
