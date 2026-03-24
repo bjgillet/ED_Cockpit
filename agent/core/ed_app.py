@@ -327,9 +327,13 @@ class EDApp:
             filtered = role.filter(event_name, data)
             if filtered is None:
                 continue
+            # Use the event name from the filtered payload so that handlers
+            # that remap journal events (e.g. Disembark → FirstFootfall) are
+            # correctly identified by the client dispatcher.
+            client_event = filtered.get("event", event_name)
             msg = EventMessage(
                 role      = role_name,
-                event     = event_name,
+                event     = client_event,
                 timestamp = timestamp,
                 data      = filtered,
             )

@@ -268,6 +268,9 @@ class ExobiologyRole(BaseRole):
                 self._fss_counts[sys_name] = dict(bodies)
             for sys_name, bodies in saved.get("saa_genera", {}).items():
                 self._saa_genera[sys_name] = {b: list(g) for b, g in bodies.items()}
+            for sys_name, bodies in saved.get("ff_context", {}).items():
+                for body_name, value in bodies.items():
+                    self._ff_context[(sys_name, body_name)] = bool(value)
             log.info("ExobiologyRole: multi-system state loaded from %s", self._state_path)
             return
 
@@ -307,6 +310,11 @@ class ExobiologyRole(BaseRole):
                     for body_name, species_map in bodies.items()
                 }
 
+            # Serialise _ff_context: (sys, body) → bool  →  sys → {body → bool}
+            serialised_ff: dict = {}
+            for (sys_name, body_name), value in self._ff_context.items():
+                serialised_ff.setdefault(sys_name, {})[body_name] = value
+
             state = {
                 "current_system":  self._system,
                 "current_body":    self._body_name,
@@ -315,6 +323,7 @@ class ExobiologyRole(BaseRole):
                 "first_footfalls": dict(self._first_footfalls),
                 "fss_counts":      dict(self._fss_counts),
                 "saa_genera":      {s: dict(b) for s, b in self._saa_genera.items()},
+                "ff_context":      serialised_ff,
                 "last_updated":    datetime.now(timezone.utc).isoformat(),
             }
             self._state_path.write_text(
@@ -419,6 +428,7 @@ class ExobiologyRole(BaseRole):
                 "ExobiologyRole: FF context for %s / %s → %s",
                 system, body, already_landed,
             )
+            self._save_state()   # persist so context survives agent restarts
         return None  # not forwarded to clients
 
     def _handle_disembark(self, data: dict) -> dict | None:
