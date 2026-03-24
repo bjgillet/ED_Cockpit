@@ -209,6 +209,7 @@ class BioScanTable(tk.Frame):
     # ------------------------------------------------------------------
     def _populate(self) -> None:
         self._item_key = {}
+        last_item: str | None = None
 
         for system in self.data:
             sys_name = system["system"]
@@ -226,6 +227,8 @@ class BioScanTable(tk.Frame):
                 open=sys_key not in self._collapsed,
             )
             self._item_key[sys_id] = sys_key
+            sys_open  = sys_key not in self._collapsed
+            last_item = sys_id
 
             for body in system.get("bodies", []):
                 # Strip the system name prefix that ED includes in body names
@@ -248,7 +251,11 @@ class BioScanTable(tk.Frame):
                     open=body_key not in self._collapsed,
                 )
                 self._item_key[body_id] = body_key
+                # Only advance last_item into body rows when the system is expanded.
+                if sys_open:
+                    last_item = body_id
 
+                body_open = body_key not in self._collapsed
                 for sp in body.get("species", []):
                     unidentified = (
                         "UNIDENTIFIED" in sp["name"]
@@ -258,7 +265,7 @@ class BioScanTable(tk.Frame):
                     tag = "unidentified" if unidentified else "child"
                     gc_symbol = "⬛" if sp.get("gc") else ""
 
-                    self.tree.insert(
+                    sp_id = self.tree.insert(
                         body_id, "end",
                         text="",
                         values=(
@@ -271,6 +278,13 @@ class BioScanTable(tk.Frame):
                         ),
                         tags=(tag,),
                     )
+                    # Only advance last_item into species rows when the body is
+                    # expanded; otherwise see() would force-expand a collapsed body.
+                    if body_open:
+                        last_item = sp_id
+
+        if last_item:
+            self.tree.see(last_item)
 
     # ------------------------------------------------------------------
     def load_data(self, data: list) -> None:

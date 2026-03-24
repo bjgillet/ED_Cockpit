@@ -8,12 +8,16 @@ Events handled
 --------------
   ApproachBody      — player approaches a landable body; used to track the
                       current body name and system (not forwarded to clients).
+  SAAScanComplete   — player completed a Detailed Surface Scanner (DSS) mapping
+                      of a body.  Initialises a first-footfall context entry
+                      ``(system, body) → False`` (scanned, not yet landed on).
+                      Not forwarded to clients.
   Disembark         — player steps off ship/SRV onto a planet surface.
-                      Forwarded only when ``FirstFootfall`` is ``true`` in the
-                      journal entry (i.e. the player is the first commander
-                      to set foot on this body galaxy-wide).  The game server
-                      resolves any multi-player race condition authoritatively,
-                      so this event is the only reliable source of truth.
+                      Treated as a confirmed first footfall when the body has a
+                      pending context entry (``False``) from ``SAAScanComplete``
+                      — i.e. the player DSS-scanned the body and is now the
+                      first to land on it.  The context entry is flipped to
+                      ``True`` so subsequent landings are ignored.
   ScanOrganic       — player performed one scan step on an organic sample.
                       Each species requires 3 scans; the ``ScanType`` field
                       distinguishes Log (1st), Sample (2nd), and Analyse (3rd).
@@ -156,10 +160,11 @@ class ExobiologyRole(BaseRole):
     journal_events = frozenset({
         "ApproachBody",
         "Disembark",
-        "FSDJump",       # track current system name (FSSBodySignals lacks StarSystem)
+        "FSDJump",          # track current system name (FSSBodySignals lacks StarSystem)
         "FSSBodySignals",
-        "Location",      # track current system name on game load
+        "Location",         # track current system name on game load
         "SAASignalsFound",
+        "SAAScanComplete",  # initialise first-footfall context per body
         "ScanOrganic",
         "SellOrganicData",
         "CodexEntry",
@@ -190,6 +195,12 @@ class ExobiologyRole(BaseRole):
         # SAA genus lists: system_name → body_name → [genus_localised, ...]
         # Lets the snapshot pre-populate genus placeholder rows on the client.
         self._saa_genera: dict[str, dict[str, list[str]]] = {}
+
+        # First-footfall context: (system, body) → has_been_footfalled (bool)
+        # Populated by SAAScanComplete (False = scanned, not yet landed).
+        # Flipped to True on the first subsequent Disembark on that body.
+        # Session-only — not persisted; rebuilt from journal replay on restart.
+        self._ff_context: dict[tuple[str, str], bool] = {}
 
         # Value resolver: seed → user cache → async API fallback
         self._value_lookup = ValueLookup(cache_dir=self._config_dir)
@@ -367,6 +378,8 @@ class ExobiologyRole(BaseRole):
             self._system    = data.get("StarSystem", self._system)
             self._save_state()
             return None   # not forwarded to clients
+        if event_name == "SAAScanComplete":
+            return self._handle_SAAScanComplete(data)
         if event_name == "Disembark":
             return self._handle_disembark(data)
         if event_name == "ScanOrganic":
@@ -383,20 +396,59 @@ class ExobiologyRole(BaseRole):
 
     # ── Event handlers ─────────────────────────────────────────────────────
 
+    def _handle_SAAScanComplete(self, data: dict) -> None:
+        """
+        Record a pending first-footfall context entry for the DSS-scanned body.
+
+        Called when the player completes a Detailed Surface Scanner mapping.
+        Sets ``_ff_context[(system, body)] = False`` meaning "scanned, not yet
+        landed on".  If a first footfall for this body was already confirmed in
+        a previous session (body is in ``_first_footfalls``), the entry is
+        initialised to ``True`` so the Disembark handler won't re-emit the event.
+        """
+        body   = data.get("BodyName", "") or self._body_name
+        system = self._system
+        if not body:
+            return None
+
+        key            = (system, body)
+        already_landed = body in self._first_footfalls.get(system, [])
+        if key not in self._ff_context:
+            self._ff_context[key] = already_landed
+            log.debug(
+                "ExobiologyRole: FF context for %s / %s → %s",
+                system, body, already_landed,
+            )
+        return None  # not forwarded to clients
+
     def _handle_disembark(self, data: dict) -> dict | None:
-        """Forward only confirmed first-footfall disembark events."""
-        if not data.get("OnPlanet") or not data.get("FirstFootfall"):
+        """
+        Confirm a first footfall when the player lands on a DSS-scanned body.
+
+        A first footfall is confirmed when:
+          • the player is on a planet (``OnPlanet=True``), AND
+          • ``_ff_context[(system, body)]`` is ``False`` — meaning the body was
+            DSS-scanned in this session and has not yet been footfalled.
+
+        The context entry is flipped to ``True`` so repeated landings on the
+        same body do not re-emit the event.
+        """
+        if not data.get("OnPlanet"):
             return None
 
         system  = data.get("StarSystem", self._system)
         body    = data.get("Body",       self._body_name)
         body_id = data.get("BodyID",     self._body_id)
 
+        if self._ff_context.get((system, body)) is not False:
+            return None   # body not DSS-scanned this session, or already footfalled
+
+        self._ff_context[(system, body)] = True
         bodies = self._first_footfalls.setdefault(system, [])
         if body not in bodies:
             bodies.append(body)
         self._save_state()
-        log.info("ExobiologyRole: first footfall on %s / %s", system, body)
+        log.info("ExobiologyRole: first footfall confirmed on %s / %s", system, body)
 
         return {
             "event":   "FirstFootfall",
