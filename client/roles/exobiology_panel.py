@@ -341,34 +341,65 @@ class ExobiologyPanel(BasePanel):
 
     def _on_codex_entry(self, data: dict) -> None:
         """
-        Back-fill the Vista Genomics scan value on the matching species row.
+        Identify a scanned species and back-fill its value on the table row.
 
-        The agent resolves the value from its seed/cache lookup and attaches it
-        to the CodexEntry payload.  We find the row by genus key (first word of
-        the species name) and update its value so the REMAINING CR column shows
-        a realistic figure from the very first scan step.
+        CodexEntry fires on the first scan step and carries the exact species
+        name.  Three things can happen depending on what data already exists:
+
+        1. Genus row already present (SAA placeholder or ScanOrganic arrived
+           first) — update value if it changed.
+        2. UNKNOWN slot placeholder present (FSS count only, no SAA yet) —
+           promote the first slot to a named genus row with the value.
+        3. No entry at all (CodexEntry arrived before any other event for
+           this body) — create a fresh genus row so the table shows the
+           species from the very first scan step.
         """
         species = data.get("name", "")
         value   = int(data.get("value", 0))
         system  = data.get("system", "")
         body    = data.get("body", "")
 
-        if not (species and value and system and body):
+        if not (species and system and body):
             return
 
         genus  = species.split()[0] if species else ""
         sp_key = genus if genus else species
 
-        body_entry = self._systems.get(system, {}).get(body)
-        if body_entry is None:
-            return
+        # Ensure the body entry exists (creates it if CodexEntry is first).
+        body_entry = (self._systems
+                      .setdefault(system, {})
+                      .setdefault(body, {
+                          "remaining_cr": 0, "scanned_cr": 0, "species": {}
+                      }))
+        species_dict = body_entry["species"]
+        changed = False
 
-        sp = body_entry["species"].get(sp_key)
-        if sp is None:
-            return
+        if sp_key in species_dict:
+            sp = species_dict[sp_key]
+            if value and sp.get("value", 0) != value:
+                sp["value"] = value
+                changed = True
+        else:
+            # Promote an UNKNOWN slot if one exists; otherwise create fresh.
+            unknown_key = next(
+                (k for k in species_dict if k.startswith("__slot_")),
+                None,
+            )
+            new_entry = {
+                "display_name": genus or species,
+                "genus":        genus,
+                "scan_count":   0,
+                "value":        value,
+                "sold":         False,
+            }
+            if unknown_key:
+                species_dict[sp_key] = species_dict.pop(unknown_key)
+                species_dict[sp_key].update(new_entry)
+            else:
+                species_dict[sp_key] = new_entry
+            changed = True
 
-        if sp.get("value", 0) != value:
-            sp["value"] = value
+        if changed:
             self._rebuild_table()
 
     def _on_sell_organic(self, data: dict) -> None:
@@ -451,13 +482,15 @@ class ExobiologyPanel(BasePanel):
                             "sold":         False,
                         }
 
-        # 3. FSS counts — UNKNOWN placeholders only for wholly absent systems.
+        # 3. FSS counts — UNKNOWN placeholders for bodies not yet in the table.
+        # Guard is at body level (not system level) so that a system that
+        # already has one body with SAA/scan data still gets FSS placeholders
+        # for its other bodies that haven't been DSS-scanned yet.
         for sys_name, bodies in data.get("fss_counts", {}).items():
-            if sys_name in self._systems:
-                continue  # system already has richer data
-            self._systems[sys_name] = {}
             for body_name, count in bodies.items():
-                self._systems[sys_name][body_name] = {
+                if body_name in self._systems.get(sys_name, {}):
+                    continue  # body already has richer data — don't overwrite
+                self._systems.setdefault(sys_name, {})[body_name] = {
                     "remaining_cr": 0,
                     "scanned_cr":   0,
                     "species": {
