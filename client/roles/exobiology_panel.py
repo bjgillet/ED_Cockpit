@@ -65,7 +65,9 @@ Events consumed
   ScanOrganic       — adds / updates a species row for the given system+body.
   SellOrganicData   — clears all accumulated data and resets the table to empty
                       (data submitted to Vista Genomics; EARNED total is retained).
-  CodexEntry        — no widget update; logged for future codex panel.
+  CodexEntry        — back-fills the Vista Genomics scan value on the matching
+                      species row (first scan step; value comes from the agent's
+                      seed / cache lookup).
 """
 from __future__ import annotations
 
@@ -162,7 +164,8 @@ class ExobiologyPanel(BasePanel):
             self._on_sell_organic(data)
         elif event == "FirstFootfall":
             self._on_first_footfall(data)
-        # CodexEntry: no widget update in this panel
+        elif event == "CodexEntry":
+            self._on_codex_entry(data)
 
     # ── Internal handlers ──────────────────────────────────────────────────
 
@@ -334,6 +337,38 @@ class ExobiologyPanel(BasePanel):
         body   = data.get("body",   "")
         if system and body:
             self._first_footfalls.setdefault(system, set()).add(body)
+            self._rebuild_table()
+
+    def _on_codex_entry(self, data: dict) -> None:
+        """
+        Back-fill the Vista Genomics scan value on the matching species row.
+
+        The agent resolves the value from its seed/cache lookup and attaches it
+        to the CodexEntry payload.  We find the row by genus key (first word of
+        the species name) and update its value so the REMAINING CR column shows
+        a realistic figure from the very first scan step.
+        """
+        species = data.get("name", "")
+        value   = int(data.get("value", 0))
+        system  = data.get("system", "")
+        body    = data.get("body", "")
+
+        if not (species and value and system and body):
+            return
+
+        genus  = species.split()[0] if species else ""
+        sp_key = genus if genus else species
+
+        body_entry = self._systems.get(system, {}).get(body)
+        if body_entry is None:
+            return
+
+        sp = body_entry["species"].get(sp_key)
+        if sp is None:
+            return
+
+        if sp.get("value", 0) != value:
+            sp["value"] = value
             self._rebuild_table()
 
     def _on_sell_organic(self, data: dict) -> None:

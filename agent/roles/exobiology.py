@@ -101,10 +101,11 @@ Wire payload shapes
     {
       "event":        "CodexEntry",
       "entry_id":     <int>,
-      "name":         "<entry name>",
+      "name":         "<species name (Name_Localised)>",
       "category":     "<category>",
       "system":       "<system>",
       "body":         "<body>",
+      "value":        <int cr>,   # Vista Genomics scan value from seed/cache (0 if unknown)
       "is_new_entry": <bool>,
     }
 
@@ -580,19 +581,41 @@ class ExobiologyRole(BaseRole):
             "genuses": [{"genus_localised": g} for g in genera],
         }
 
-    @staticmethod
-    def _handle_codex_entry(data: dict) -> dict | None:
+    def _handle_codex_entry(self, data: dict) -> dict | None:
         category = data.get("Category_Localised") or data.get("Category", "")
         if category not in _BIO_CATEGORIES:
             return None   # not a biology entry — drop
+
+        species = data.get("Name_Localised") or data.get("Name", "")
+        system  = self._system
+        body    = self._body_name
+
+        # Resolve the Vista Genomics scan value from the local seed / cache.
+        # CodexEntry fires on the first scan step and gives us the exact species
+        # name, so this is an early opportunity to fill in a value that may not
+        # yet be on the scan record (ScanOrganic with ScanType="Log" arrives at
+        # the same time but the record might not exist yet).
+        value = self._value_lookup.get(species) if species else 0
+
+        if species and value:
+            # Back-fill the value on an existing scan record if present
+            species_map = self._systems.get(system, {}).get(body, {})
+            record = species_map.get(species)
+            if record and record.get("value", 0) != value:
+                record["value"] = value
+                self._save_state()
+            log.debug(
+                "ExobiologyRole: CodexEntry resolved %d CR for %r on %s / %s",
+                value, species, system, body,
+            )
+
         return {
             "event":        "CodexEntry",
             "entry_id":     data.get("EntryID", 0),
-            "name":         (data.get("Name_Localised")
-                             or data.get("Name", "")),
+            "name":         species,
             "category":     category,
-            "system":       data.get("System", ""),
-            "body":         data.get("NearestDestination_Localised")
-                            or data.get("NearestDestination", ""),
+            "system":       system,
+            "body":         body,
+            "value":        value,
             "is_new_entry": bool(data.get("IsNewEntry", False)),
         }
