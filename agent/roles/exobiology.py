@@ -586,19 +586,26 @@ class ExobiologyRole(BaseRole):
         if category not in _BIO_CATEGORIES:
             return None   # not a biology entry — drop
 
-        species = data.get("Name_Localised") or data.get("Name", "")
-        system  = self._system
-        body    = self._body_name
+        raw_name = data.get("Name_Localised") or data.get("Name", "")
+        system   = self._system
+        body     = self._body_name
+
+        # Name_Localised can include a colour-variant suffix ("Fonticulua Campestris - Ameth").
+        # The seed file and ScanOrganic.Species_Localised use the base species name without
+        # the colour ("Fonticulua Campestris"), so strip the suffix before the lookup.
+        # The stripped name is also what we send to clients — colour is not tracked here.
+        species = raw_name.rsplit(" - ", 1)[0].strip() if " - " in raw_name else raw_name
 
         # Resolve the Vista Genomics scan value from the local seed / cache.
         # CodexEntry fires on the first scan step and gives us the exact species
         # name, so this is an early opportunity to fill in a value that may not
-        # yet be on the scan record (ScanOrganic with ScanType="Log" arrives at
-        # the same time but the record might not exist yet).
+        # yet be on the scan record.
         value = self._value_lookup.get(species) if species else 0
 
         if species and value:
-            # Back-fill the value on an existing scan record if present
+            # Back-fill the value on an existing scan record if present.
+            # Scan records are keyed by Species_Localised which matches the
+            # stripped species name used here.
             species_map = self._systems.get(system, {}).get(body, {})
             record = species_map.get(species)
             if record and record.get("value", 0) != value:
@@ -612,7 +619,7 @@ class ExobiologyRole(BaseRole):
         return {
             "event":        "CodexEntry",
             "entry_id":     data.get("EntryID", 0),
-            "name":         species,
+            "name":         species,       # base species name, colour suffix stripped
             "category":     category,
             "system":       system,
             "body":         body,

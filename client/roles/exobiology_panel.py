@@ -341,18 +341,18 @@ class ExobiologyPanel(BasePanel):
 
     def _on_codex_entry(self, data: dict) -> None:
         """
-        Identify a scanned species and back-fill its value on the table row.
+        Identify a scanned species and back-fill its display name and value.
 
-        CodexEntry fires on the first scan step and carries the exact species
-        name.  Three things can happen depending on what data already exists:
+        The agent sends the base species name (colour stripped) in ``name``,
+        e.g. ``"Fonticulua Campestris"``.  Three things can happen:
 
         1. Genus row already present (SAA placeholder or ScanOrganic arrived
-           first) — update value if it changed.
+           first) — promote display_name from generic genus to full species
+           name and update value if it changed.
         2. UNKNOWN slot placeholder present (FSS count only, no SAA yet) —
-           promote the first slot to a named genus row with the value.
+           promote the first slot to a named genus row.
         3. No entry at all (CodexEntry arrived before any other event for
-           this body) — create a fresh genus row so the table shows the
-           species from the very first scan step.
+           this body) — create a fresh row.
         """
         species = data.get("name", "")
         value   = int(data.get("value", 0))
@@ -376,6 +376,13 @@ class ExobiologyPanel(BasePanel):
 
         if sp_key in species_dict:
             sp = species_dict[sp_key]
+            # Promote display_name from the generic genus ("Fonticulua") to the
+            # full species name ("Fonticulua Campestris") when the row has not
+            # yet been updated by ScanOrganic (which sets the variant display).
+            current = sp.get("display_name", "")
+            if current in ("", genus, " UNKNOWN") and species and current != species:
+                sp["display_name"] = species
+                changed = True
             if value and sp.get("value", 0) != value:
                 sp["value"] = value
                 changed = True
