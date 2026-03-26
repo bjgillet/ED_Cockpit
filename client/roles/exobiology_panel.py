@@ -354,6 +354,9 @@ class ExobiologyPanel(BasePanel):
         3. No entry at all (CodexEntry arrived before any other event for
            this body) — create a fresh row.
         """
+
+        print (f"CodexEntry received: {data}")
+
         species = data.get("name", "")
         value   = int(data.get("value", 0))
         system  = data.get("system", "")
@@ -386,6 +389,9 @@ class ExobiologyPanel(BasePanel):
             if value and sp.get("value", 0) != value:
                 sp["value"] = value
                 changed = True
+            print (f"specie name updated: {sp_key} → {sp['display_name']}, value: {sp.get('value', 0)}")
+            print (f" System: {system}, Body: {body}")
+
         else:
             # Promote an UNKNOWN slot if one exists; otherwise create fresh.
             unknown_key = next(
