@@ -94,7 +94,7 @@ def _fmt_cr(value: int) -> str:
 
 class ExobiologyPanel(BasePanel):
     """Live exobiology panel backed by BioScanTable."""
-
+    _debug = False
     role_name = Role.EXOBIOLOGY
 
     def _build_ui(self) -> None:
@@ -355,7 +355,7 @@ class ExobiologyPanel(BasePanel):
            this body) — create a fresh row.
         """
 
-        print (f"CodexEntry received: {data}")
+        print (f"CodexEntry received: {data}") if self._debug else None
 
         species = data.get("name", "")
         value   = int(data.get("value", 0))
@@ -389,8 +389,8 @@ class ExobiologyPanel(BasePanel):
             if value and sp.get("value", 0) != value:
                 sp["value"] = value
                 changed = True
-            print (f"specie name updated: {sp_key} → {sp['display_name']}, value: {sp.get('value', 0)}")
-            print (f" System: {system}, Body: {body}")
+            print (f"specie name updated: {sp_key} → {sp['display_name']}, value: {sp.get('value', 0)}") if self._debug else None
+            print (f" System: {system}, Body: {body}") if self._debug else None
 
         else:
             # Promote an UNKNOWN slot if one exists; otherwise create fresh.
