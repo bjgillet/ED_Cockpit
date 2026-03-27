@@ -397,6 +397,7 @@ class ExobiologyRole(BaseRole):
         if event_name == "SellOrganicData":
             return self._handle_sell_organic(data)
         if event_name == "CodexEntry":
+            print(f"ExobiologyRole: received CodexEntry event with data: {data}")
             return self._handle_codex_entry(data)
         if event_name == "SAASignalsFound":
             return self._handle_SAASignalsFound(data)
@@ -584,6 +585,7 @@ class ExobiologyRole(BaseRole):
     def _handle_codex_entry(self, data: dict) -> dict | None:
         category = data.get("Category_Localised") or data.get("Category", "")
         if category not in _BIO_CATEGORIES:
+            print(f"ExobiologyRole: skipping CodexEntry with non-biology category {category!r}")
             return None   # not a biology entry — drop
 
         raw_name = data.get("Name_Localised") or data.get("Name", "")
@@ -595,7 +597,7 @@ class ExobiologyRole(BaseRole):
         # the colour ("Fonticulua Campestris"), so strip the suffix before the lookup.
         # The stripped name is also what we send to clients — colour is not tracked here.
         species = raw_name.rsplit(" - ", 1)[0].strip() if " - " in raw_name else raw_name
-
+        print(f"ExobiologyRole: processing CodexEntry for species {species!r} (raw name: {raw_name!r}) in category {category!r}")
         # Resolve the Vista Genomics scan value from the local seed / cache.
         # CodexEntry fires on the first scan step and gives us the exact species
         # name, so this is an early opportunity to fill in a value that may not
