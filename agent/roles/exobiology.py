@@ -145,18 +145,21 @@ from agent.roles.base_role import BaseRole
 from agent.roles.value_lookup import ValueLookup
 from shared.roles_def import Role
 
+
 log = logging.getLogger(__name__)
 
 # CodexEntry categories that belong to biology
 _BIO_CATEGORIES: frozenset[str] = frozenset({
     "$Codex_Category_Biology;",
     "Biology",
+    "$Codex_SubCategory_Organic_Structures;",
+    "Organic structures",
 })
 
 
 class ExobiologyRole(BaseRole):
     """Exobiology role — filters and enriches organic-scan journal events."""
-
+    _debug = False
     name = Role.EXOBIOLOGY
     journal_events = frozenset({
         "ApproachBody",
@@ -397,7 +400,7 @@ class ExobiologyRole(BaseRole):
         if event_name == "SellOrganicData":
             return self._handle_sell_organic(data)
         if event_name == "CodexEntry":
-            print(f"ExobiologyRole: received CodexEntry event with data: {data}")
+            print(f"ExobiologyRole: received CodexEntry event with data: {data}") if _debug else None
             return self._handle_codex_entry(data)
         if event_name == "SAASignalsFound":
             return self._handle_SAASignalsFound(data)
@@ -583,9 +586,9 @@ class ExobiologyRole(BaseRole):
         }
 
     def _handle_codex_entry(self, data: dict) -> dict | None:
-        category = data.get("Category_Localised") or data.get("Category", "")
+        category = data.get("SubCategory_Localised") or data.get("SubCategory", "")
         if category not in _BIO_CATEGORIES:
-            print(f"ExobiologyRole: skipping CodexEntry with non-biology category {category!r}")
+            print(f"ExobiologyRole: skipping CodexEntry with non-biology category {category!r}") if _debug else None
             return None   # not a biology entry — drop
 
         raw_name = data.get("Name_Localised") or data.get("Name", "")
@@ -597,7 +600,7 @@ class ExobiologyRole(BaseRole):
         # the colour ("Fonticulua Campestris"), so strip the suffix before the lookup.
         # The stripped name is also what we send to clients — colour is not tracked here.
         species = raw_name.rsplit(" - ", 1)[0].strip() if " - " in raw_name else raw_name
-        print(f"ExobiologyRole: processing CodexEntry for species {species!r} (raw name: {raw_name!r}) in category {category!r}")
+        print(f"ExobiologyRole: processing CodexEntry for species {species!r} (raw name: {raw_name!r}) in category {category!r}") if _debug else None
         # Resolve the Vista Genomics scan value from the local seed / cache.
         # CodexEntry fires on the first scan step and gives us the exact species
         # name, so this is an early opportunity to fill in a value that may not
@@ -621,7 +624,7 @@ class ExobiologyRole(BaseRole):
         return {
             "event":        "CodexEntry",
             "entry_id":     data.get("EntryID", 0),
-            "name":         species,       # base species name, colour suffix stripped
+            "name":         raw_name,       # replace with species to strip colour suffix
             "category":     category,
             "system":       system,
             "body":         body,

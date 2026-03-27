@@ -13,8 +13,7 @@ In this section you will find General informations, User guides and Developer gu
 - [Installation Guide](install.md) : Quickstart guide to install ED Cockpit.
 - [Agent User Guide] - **NOT YET AVAILABLE : UNDER DESIGN**\
 (user_agent.md) : Anything about using your agent.
-- [Clients User Guide] - **NOT YET AVAILABLE : UNDER DESIGN**\
-(user_roles.md) : Using Clients and roles details.
+- [Clients User Guide](user_roles.md) : Using Clients and roles details.
 
 ## Developer Guides
 - [Architecture Guide] - **NOT YET AVAILABLE : UNDER DESIGN**\
