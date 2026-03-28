@@ -7,7 +7,7 @@ Displays live mining data received from the agent:
   • Current asteroid composition (ProspectedAsteroid)
   • Refined ore tally (MiningRefined)
   • Live cargo fill bar updated from Status.json
-  • Drone launch counter (Collector / Prospector)
+  • Drone launch counter (Collection / Prospector)
   • Cracked asteroid counter (AsteroidCracked)
 """
 from __future__ import annotations
@@ -42,7 +42,7 @@ _BAR_H = 10
 
 class MiningPanel(BasePanel):
     """Live mining panel: asteroid composition + refined ore tally."""
-
+    _debug = True
     role_name = Role.MINING
 
     def _build_ui(self) -> None:
@@ -190,6 +190,7 @@ class MiningPanel(BasePanel):
         elif event == "MiningRefined":
             self._on_refined(data)
         elif event == "LaunchDrone":
+            print (f"From on_event : Drone launched: {data}") if self._debug else None
             self._on_drone(data)
         elif event == "Status":
             self._on_status(data)
@@ -207,14 +208,14 @@ class MiningPanel(BasePanel):
             text=motherlode if motherlode else "None",
             fg=GREEN_FG if motherlode else TEXT_FG,
         )
-        self._lbl_remaining.config(text=f"{remaining * 100:.0f}%")
+        self._lbl_remaining.config(text=f"{remaining:.0f}%")
 
         for w in self._mat_frame.winfo_children():
             w.destroy()
 
         self._mat_frame.columnconfigure(1, weight=1)
         for i, m in enumerate(data.get("materials", [])):
-            pct = m.get("proportion", 0.0) * 100
+            pct = m.get("proportion", 0.0)
             fg  = GREEN_FG if pct >= 20 else (HEADER_FG if pct >= 10 else TEXT_FG)
             tk.Label(self._mat_frame, text=f"  {m.get('name', '—')}",
                      bg=PANEL_BG, fg=fg, font=FONT_BODY,
@@ -228,8 +229,9 @@ class MiningPanel(BasePanel):
         self._rebuild_cargo()
 
     def _on_drone(self, data: dict) -> None:
+        print (f"Drone launched: {data}") if self._debug else None
         drone_type = data.get("drone_type", "")
-        if drone_type == "Collector":
+        if drone_type == "Collection":
             self._n_collectors += 1
             self._lbl_collectors.config(text=str(self._n_collectors))
         elif drone_type == "Prospector":

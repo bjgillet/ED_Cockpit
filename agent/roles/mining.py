@@ -61,7 +61,7 @@ _FLAG_CARGO_SCOOP = 0x00000200
 
 class MiningRole(BaseRole):
     """Mining role — filters and enriches asteroid-mining journal events."""
-
+    _debug=True
     name = Role.MINING
     journal_events = frozenset({
         "AsteroidCracked",

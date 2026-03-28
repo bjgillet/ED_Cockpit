@@ -87,6 +87,7 @@ class EDApp:
     they subscribe to receive state updates via ``queue.Queue`` and
     unsubscribe when they close.  No GUI code ever lives here.
     """
+    _debug = True  # enable verbose logging
 
     def __init__(
         self,
@@ -121,7 +122,7 @@ class EDApp:
 
         # ── Role handlers (instantiated once) ────────────────────────────
         self._roles = {name: get_role(name) for name in all_role_names()}
-
+        print(f"[ED Agent] Loaded roles: {self._roles}")
         # ── Client registry ───────────────────────────────────────────────
         self._registry = ClientRegistry(self._config_dir / "clients.json")
 
