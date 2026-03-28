@@ -36,10 +36,10 @@ Wire payload shapes
       "type":  "<commodity_localised>",   # e.g. "Painite"
     }
 
-  LaunchDrone (collector / prospector only) →
+  LaunchDrone (collection / prospector only) →
     {
       "event":      "LaunchDrone",
-      "drone_type": "Collector" | "Prospector",
+      "drone_type": "Collection" | "Prospector",
     }
 
 Status payload (filter_status) →
@@ -53,7 +53,7 @@ from __future__ import annotations
 from agent.roles.base_role import BaseRole
 from shared.roles_def import Role
 
-_MINING_DRONE_TYPES: frozenset[str] = frozenset({"Collector", "Prospector"})
+_MINING_DRONE_TYPES: frozenset[str] = frozenset({"Collection", "Prospector"})
 
 # ── Status.json flag bit ───────────────────────────────────────────────────
 _FLAG_CARGO_SCOOP = 0x00000200
