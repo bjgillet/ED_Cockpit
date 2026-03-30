@@ -3,6 +3,36 @@ ED Cockpit — Mining Role
 =========================
 Filters Elite Dangerous journal events relevant to mining activities.
 
+Context File
+------------
+  Configuration file so mining session state survives agent restart
+  File located at <config_dir>/mining.json 
+
+    State file format:
+    {
+      "ship":{
+        "name": <ship name>,
+        "cargo_capacity": <float t>,
+        "cargo_used": <float t>,
+        "cargo": [
+          {"item name":<string>, "item_quantity":int}
+          ...
+          ]
+        },
+        "limpets": {
+            "collection": <int>,
+            "prospector": <int>,
+            "remaining": <int>,
+        },
+        "asteroid": {
+            "materials": [
+                {"name": <string>, "proportion": <int 0-100>},
+                ...
+            ],
+            "remaining": <float 0-1>,
+        },
+      "last_updated": <ISO 8601 timestamp>
+    }
 Events handled
 --------------
   ProspectedAsteroid — asteroid prospected; reports material composition
