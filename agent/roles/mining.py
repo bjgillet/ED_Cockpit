@@ -388,10 +388,12 @@ class MiningRole(BaseRole):
         }
 
     def _handle_cargo(self, data: dict) -> dict:
-        inventory = data.get("Inventory", [])
+        inventory = data.get("Inventory")
         inv_map: dict[str, int] = {}
-        used = 0
-        if isinstance(inventory, list):
+        used = float(self._last_status.get("cargo", 0.0))
+        have_inventory = isinstance(inventory, list)
+        if have_inventory:
+            used = 0.0
             for item in inventory:
                 if not isinstance(item, dict):
                     continue
@@ -404,25 +406,33 @@ class MiningRole(BaseRole):
                 name = item.get("Name_Localised") or item.get("Name", "")
                 if name:
                     inv_map[str(name)] = count
+        elif "Count" in data:
+            try:
+                used = float(data.get("Count", used))
+            except (TypeError, ValueError):
+                pass
         self._last_status["cargo"] = float(used)
 
         # Keep refined tally aligned with real cargo inventory:
         # if cargo is sold/transferred/refuelled, tracked materials decrease too.
-        for name in list(self._tracked_refined):
-            current = int(inv_map.get(name, 0))
-            if current <= 0:
-                self._cargo_tally.pop(name, None)
-            else:
-                self._cargo_tally[name] = current
+        if have_inventory:
+            for name in list(self._tracked_refined):
+                current = int(inv_map.get(name, 0))
+                if current <= 0:
+                    self._cargo_tally.pop(name, None)
+                else:
+                    self._cargo_tally[name] = current
 
-        self._available_limpets = self._extract_limpets(inv_map)
+            limpet_count = self._extract_limpets(inv_map)
+            if limpet_count is not None:
+                self._available_limpets = limpet_count
         self._save_state()
         return {
             "event": "Cargo",
             "cargo": float(used),
             "available_limpets": self._available_limpets,
             "refined_cargo_tally": dict(self._cargo_tally),
-            "inventory": inventory if isinstance(inventory, list) else [],
+            "inventory": inventory if have_inventory else [],
         }
 
     def _handle_docked(self, data: dict) -> dict:
@@ -444,9 +454,9 @@ class MiningRole(BaseRole):
         }
 
     @staticmethod
-    def _extract_limpets(inv_map: dict[str, int]) -> int:
+    def _extract_limpets(inv_map: dict[str, int]) -> int | None:
         for key, value in inv_map.items():
             k = key.strip().lower()
-            if k in ("limpet", "drones"):
+            if ("limpet" in k) or ("drone" in k):
                 return int(value)
-        return 0
+        return None
