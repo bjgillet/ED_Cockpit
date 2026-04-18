@@ -52,6 +52,7 @@ from typing import Callable, Dict, List, Optional
 
 from agent.core.action_handler import ActionHandler
 from agent.core.ed_process_watcher import EDProcessWatcher, EDWatcherState
+from agent.core.journal_memory import JournalMemory
 from agent.core.journal_reader import JournalReader
 from agent.core.status_reader import StatusReader
 from agent.network.client_registry import ClientRegistry
@@ -141,6 +142,7 @@ class EDApp:
         self.watcher = EDProcessWatcher(on_update=self._on_watcher_update)
         self._journal = JournalReader(on_event=self._on_journal_event)
         self._status  = StatusReader(on_status=self._on_status_update)
+        self._journal_memory = JournalMemory(config_dir=self._config_dir)
 
         # ── Asyncio layer ─────────────────────────────────────────────────
         self._loop:   Optional[asyncio.AbstractEventLoop] = None
@@ -248,6 +250,10 @@ class EDApp:
             return []
         return self._ws_server.connected_clients
 
+    def journal_memory_snapshot(self) -> dict:
+        """Return the agent's current journal-derived remembered values."""
+        return self._journal_memory.snapshot()
+
     @property
     def cert_fingerprint(self) -> str:
         """SHA-256 fingerprint of the agent TLS cert, or empty if TLS disabled."""
@@ -296,10 +302,12 @@ class EDApp:
 
         # When files are found, wire them into the readers
         if state.get("phase") == EDWatcherState.COMPLETE:
-            self._journal.set_path(state.get("journal_path"))
+            journal_path = state.get("journal_path")
+            self._journal.set_path(journal_path)
             self._status.set_path(state.get("status_path"))
-            if self._journal:
-                journal_dir = Path(self._journal).parent
+            self._journal_memory.warm_from_journal(journal_path)
+            if journal_path:
+                journal_dir = Path(journal_path).parent
                 exo_role = self._roles.get("exobiology")
                 if exo_role:
                     exo_role.set_journal_dir(journal_dir)
@@ -319,6 +327,7 @@ class EDApp:
         """
         if self._loop is None:
             return
+        self._journal_memory.update_from_event(event_name, data)
 
         timestamp: str = data.get("timestamp", "")
 

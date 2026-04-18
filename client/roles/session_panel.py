@@ -15,6 +15,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from client.GUI.scrollable_panel import ScrollablePanelContainer
 from client.roles.base_panel import BasePanel
 from shared.roles_def import Role
 
@@ -46,16 +47,23 @@ class SessionPanel(BasePanel):
 
     def _build_ui(self) -> None:
         self.configure(style="TFrame")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self._scroll = ScrollablePanelContainer(self, bg=BG)
+        self._scroll.grid(row=0, column=0, sticky="nsew")
+        self._panel_body = self._scroll.body
+        self._scroll.bind_mousewheel_targets(self, self._scroll.canvas, self._panel_body)
 
         # ── Header ────────────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=HEADER_BG, pady=4)
+        hdr = tk.Frame(self._panel_body, bg=HEADER_BG, pady=4)
         hdr.pack(fill="x")
         tk.Label(hdr, text="SESSION MONITOR", bg=HEADER_BG, fg=HEADER_FG,
                  font=FONT_BOLD).pack(side="left", padx=10)
 
         # ── CMDR / ship row ───────────────────────────────────────────────
         self._section("COMMANDER")
-        cmdr = tk.Frame(self, bg=PANEL_BG)
+        cmdr = tk.Frame(self._panel_body, bg=PANEL_BG)
         cmdr.pack(fill="x", padx=4, pady=(0, 4))
         cmdr.columnconfigure(1, weight=1)
 
@@ -65,7 +73,7 @@ class SessionPanel(BasePanel):
 
         # ── Location ──────────────────────────────────────────────────────
         self._section("LOCATION")
-        loc = tk.Frame(self, bg=PANEL_BG)
+        loc = tk.Frame(self._panel_body, bg=PANEL_BG)
         loc.pack(fill="x", padx=4, pady=(0, 4))
         loc.columnconfigure(1, weight=1)
 
@@ -76,7 +84,7 @@ class SessionPanel(BasePanel):
 
         # ── Last jump ─────────────────────────────────────────────────────
         self._section("LAST FSD JUMP")
-        jump = tk.Frame(self, bg=PANEL_BG)
+        jump = tk.Frame(self._panel_body, bg=PANEL_BG)
         jump.pack(fill="x", padx=4, pady=(0, 4))
         jump.columnconfigure(1, weight=1)
 
@@ -88,7 +96,7 @@ class SessionPanel(BasePanel):
 
         # ── Ship status (live from Status.json) ───────────────────────────
         self._section("SHIP STATUS")
-        ss = tk.Frame(self, bg=PANEL_BG)
+        ss = tk.Frame(self._panel_body, bg=PANEL_BG)
         ss.pack(fill="x", padx=4, pady=(0, 4))
         ss.columnconfigure(1, weight=1)
 
@@ -154,7 +162,7 @@ class SessionPanel(BasePanel):
 
         # ── Timeline ──────────────────────────────────────────────────────
         self._section("EVENT TIMELINE")
-        tl_outer = tk.Frame(self, bg=PANEL_BG)
+        tl_outer = tk.Frame(self._panel_body, bg=PANEL_BG)
         tl_outer.pack(fill="both", expand=True, padx=4, pady=(0, 4))
 
         self._timeline = tk.Listbox(
@@ -175,6 +183,7 @@ class SessionPanel(BasePanel):
         # ── State ─────────────────────────────────────────────────────────
         self._timeline_entries: list[str] = []
         self._fuel_main_max: float = 0.0
+        self.after_idle(self._scroll.refresh_layout)
 
     # ── Event dispatch ─────────────────────────────────────────────────────
 
@@ -304,6 +313,7 @@ class SessionPanel(BasePanel):
         self._timeline.delete(0, "end")
         for entry in self._timeline_entries:
             self._timeline.insert("end", f"  {entry}")
+        self.after_idle(self._scroll.refresh_layout)
 
     def _make_row(
         self, parent: tk.Frame, row: int, label: str, attr: str
@@ -317,7 +327,7 @@ class SessionPanel(BasePanel):
         setattr(self, attr, lbl)
 
     def _section(self, title: str) -> None:
-        bar = tk.Frame(self, bg="#2a2a4a", pady=1)
+        bar = tk.Frame(self._panel_body, bg="#2a2a4a", pady=1)
         bar.pack(fill="x", pady=(4, 0))
         tk.Label(bar, text=f"  {title}", bg="#2a2a4a", fg=HEADER_FG,
                  font=FONT_BOLD, anchor="w").pack(fill="x", padx=4, pady=2)

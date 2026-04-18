@@ -74,6 +74,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from client.GUI.scrollable_panel import ScrollablePanelContainer
 from client.roles.base_panel import BasePanel
 from client.roles.bioscan_table import BioScanTable, BG, HEADER_BG, HEADER_FG, FONT_BOLD
 from shared.roles_def import Role
@@ -99,9 +100,16 @@ class ExobiologyPanel(BasePanel):
 
     def _build_ui(self) -> None:
         self.configure(style="TFrame")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self._scroll = ScrollablePanelContainer(self, bg=BG)
+        self._scroll.grid(row=0, column=0, sticky="nsew")
+        self._panel_body = self._scroll.body
+        self._scroll.bind_mousewheel_targets(self, self._scroll.canvas, self._panel_body)
 
         # ── Header bar ────────────────────────────────────────────────────
-        header = tk.Frame(self, bg=HEADER_BG, pady=4)
+        header = tk.Frame(self._panel_body, bg=HEADER_BG, pady=4)
         header.pack(fill="x")
         tk.Label(
             header,
@@ -111,7 +119,7 @@ class ExobiologyPanel(BasePanel):
         ).pack(side="left", padx=10)
 
         # ── Totals strip ──────────────────────────────────────────────────
-        totals = tk.Frame(self, bg="#10102a", pady=3)
+        totals = tk.Frame(self._panel_body, bg="#10102a", pady=3)
         totals.pack(fill="x")
 
         tk.Label(totals, text="REMAINING:", bg="#10102a", fg="#4da6ff",
@@ -136,7 +144,7 @@ class ExobiologyPanel(BasePanel):
         self._lbl_earned.pack(side="left")
 
         # ── BioScan table ─────────────────────────────────────────────────
-        self._table = BioScanTable(self, data=[])
+        self._table = BioScanTable(self._panel_body, data=[])
         self._table.pack(fill="both", expand=True)
 
         # ── Internal state ────────────────────────────────────────────────
@@ -148,6 +156,7 @@ class ExobiologyPanel(BasePanel):
         self._total_remaining: int = 0
         self._total_scanned:   int = 0
         self._total_earned:    int = 0
+        self.after_idle(self._scroll.refresh_layout)
 
     # ── Event dispatch ─────────────────────────────────────────────────────
 
@@ -603,3 +612,4 @@ class ExobiologyPanel(BasePanel):
         self._lbl_remaining.config(text=f"{_fmt_cr(self._total_remaining)} CR")
         self._lbl_scanned.config(text=f"{_fmt_cr(self._total_scanned)} CR")
         self._lbl_earned.config(text=f"{_fmt_cr(self._total_earned)} CR")
+        self.after_idle(self._scroll.refresh_layout)

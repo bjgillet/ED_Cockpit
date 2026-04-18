@@ -52,6 +52,7 @@ Standalone use
 """
 from __future__ import annotations
 
+import json
 import queue
 import sys
 import tkinter as tk
@@ -177,6 +178,7 @@ class EDStatusMonitor(tk.Toplevel):
         self._app           = app
         self._queue         = app.subscribe()   # thread-safe state queue
         self._last_state:   Dict  = {}
+        self._last_memory:  Dict  = {}
         self._blink_state:  bool  = False
         self._quit_on_close: bool = quit_on_close
 
@@ -196,6 +198,7 @@ class EDStatusMonitor(tk.Toplevel):
         self._build_process_panel()
         self._build_file_panel("JOURNAL FILE",  is_journal=True)
         self._build_file_panel("STATUS FILE",   is_journal=False)
+        self._build_journal_memory_panel()
         self._build_button_bar()
 
     def _build_title_bar(self) -> None:
@@ -240,6 +243,17 @@ class EDStatusMonitor(tk.Toplevel):
         bar = tk.Frame(self, bg=BG, pady=10)
         bar.pack(fill="x", padx=14)
 
+        self._copy_mem_btn = tk.Button(
+            bar,
+            text="⎘  Copy Memory JSON",
+            bg="#1a2a4a", fg=TITLE_FG,
+            activebackground="#0a1428", activeforeground=TEXT_FG,
+            relief="flat", font=FONT_BTN, cursor="hand2",
+            padx=12, pady=4,
+            command=self._on_copy_memory,
+        )
+        self._copy_mem_btn.pack(side="left", padx=(0, 6))
+
         self._rescan_btn = tk.Button(
             bar,
             text="⟳  Rescan",
@@ -261,6 +275,33 @@ class EDStatusMonitor(tk.Toplevel):
             command=self._on_quit,
         ).pack(side="right")
 
+    def _build_journal_memory_panel(self) -> None:
+        self._section_header("LAST KNOWN JOURNAL STATE")
+        panel = tk.Frame(self, bg=PANEL_BG)
+        panel.pack(fill="x", padx=4, pady=2)
+        panel.columnconfigure(1, weight=1)
+
+        self._memory_labels: dict[str, tk.Label] = {}
+        rows = [
+            ("Commander:", "commander"),
+            ("Ship:", "ship"),
+            ("Hull / Cargo:", "hull_cargo"),
+            ("Fuel Capacity:", "fuel"),
+            ("Location:", "location"),
+            ("Cargo Inventory:", "inventory"),
+        ]
+        for row, (title, key) in enumerate(rows):
+            tk.Label(
+                panel, text=title, bg=PANEL_BG, fg=TITLE_FG,
+                font=FONT_BODY, anchor="w",
+            ).grid(row=row, column=0, sticky="nw", padx=(12, 6), pady=1)
+            lbl = tk.Label(
+                panel, text="—", bg=PANEL_BG, fg=TEXT_FG,
+                font=FONT_PATH, anchor="w", justify="left", wraplength=520,
+            )
+            lbl.grid(row=row, column=1, sticky="w", padx=(0, 8), pady=1)
+            self._memory_labels[key] = lbl
+
     # ── Queue polling (tkinter event-loop thread only) ─────────────────────
 
     def _poll(self) -> None:
@@ -279,6 +320,7 @@ class EDStatusMonitor(tk.Toplevel):
         if latest is not None and latest != self._last_state:
             self._last_state = latest
             self._refresh(latest)
+        self._refresh_journal_memory()
 
         self._blink_state = not self._blink_state
         self._maybe_blink()
@@ -336,10 +378,90 @@ class EDStatusMonitor(tk.Toplevel):
             if not self._last_state.get("status_path"):
                 self._status_row.dot.set_color(color)
 
+    def _refresh_journal_memory(self) -> None:
+        snapshot = self._app.journal_memory_snapshot()
+        if snapshot == self._last_memory:
+            return
+        self._last_memory = snapshot
+
+        ship = snapshot.get("ship", {})
+        location = snapshot.get("location", {})
+
+        commander = snapshot.get("commander_name", "") or "—"
+        ship_type = ship.get("ship", "") or "—"
+        ship_name = ship.get("ship_name", "")
+        if ship_name:
+            ship_text = f"{ship_type} ({ship_name})"
+        else:
+            ship_text = ship_type
+
+        hull_health = float(ship.get("hull_health", 0.0))
+        cargo_capacity = float(ship.get("cargo_capacity", 0.0))
+        hull_cargo = f"{hull_health * 100:.0f}% / {cargo_capacity:.0f} t"
+
+        fuel_text = self._format_fuel_capacity(ship.get("fuel_capacity", {}))
+
+        star_system = location.get("star_system", "") or "—"
+        body = location.get("body", "") or "—"
+        location_text = f"{star_system} / {body}"
+
+        inventory_text = self._format_inventory(snapshot.get("cargo_inventory", []))
+
+        self._memory_labels["commander"].config(text=commander)
+        self._memory_labels["ship"].config(text=ship_text)
+        self._memory_labels["hull_cargo"].config(text=hull_cargo)
+        self._memory_labels["fuel"].config(text=fuel_text)
+        self._memory_labels["location"].config(text=location_text)
+        self._memory_labels["inventory"].config(text=inventory_text)
+
+    @staticmethod
+    def _format_fuel_capacity(value) -> str:
+        if isinstance(value, dict):
+            main = value.get("Main")
+            reserve = value.get("Reserve")
+            if main is not None or reserve is not None:
+                try:
+                    main_txt = f"{float(main):.2f} t" if main is not None else "?"
+                    res_txt = f"{float(reserve):.2f} t" if reserve is not None else "?"
+                    return f"Main {main_txt}, Reserve {res_txt}"
+                except (TypeError, ValueError):
+                    pass
+            return str(value) if value else "—"
+        if isinstance(value, (int, float)):
+            return f"{float(value):.2f} t"
+        return "—"
+
+    @staticmethod
+    def _format_inventory(value) -> str:
+        if not isinstance(value, list) or not value:
+            return "—"
+        names: list[str] = []
+        total_units = 0
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("Name_Localised") or item.get("Name") or "Unknown"
+            try:
+                count = int(item.get("Count", 0))
+            except (TypeError, ValueError):
+                count = 0
+            total_units += max(count, 0)
+            names.append(f"{name} x{count}")
+            if len(names) >= 5:
+                break
+        extra = " …" if len(value) > 5 else ""
+        return f"{total_units} unit(s) — " + ", ".join(names) + extra
+
     # ── Button handlers ────────────────────────────────────────────────────
 
     def _on_rescan(self) -> None:
         self._app.rescan()
+
+    def _on_copy_memory(self) -> None:
+        payload = self._app.journal_memory_snapshot()
+        text = json.dumps(payload, indent=2, ensure_ascii=False)
+        self.clipboard_clear()
+        self.clipboard_append(text)
 
     def _on_quit(self) -> None:
         """Quit button: close this window and terminate the application."""

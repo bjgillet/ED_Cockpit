@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from client.GUI.scrollable_panel import ScrollablePanelContainer
 from client.roles.base_panel import BasePanel
 from shared.roles_def import Role
 
@@ -42,21 +43,28 @@ _BAR_H = 10
 
 class MiningPanel(BasePanel):
     """Live mining panel: asteroid composition + refined ore tally."""
-    _debug = True
+    _debug = False
     role_name = Role.MINING
 
     def _build_ui(self) -> None:
         self.configure(style="TFrame")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self._scroll = ScrollablePanelContainer(self, bg=BG)
+        self._scroll.grid(row=0, column=0, sticky="nsew")
+        self._panel_body = self._scroll.body
+        self._scroll.bind_mousewheel_targets(self, self._scroll.canvas, self._panel_body)
 
         # ── Header ────────────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=HEADER_BG, pady=4)
+        hdr = tk.Frame(self._panel_body, bg=HEADER_BG, pady=4)
         hdr.pack(fill="x")
         tk.Label(hdr, text="ASTEROID MINING", bg=HEADER_BG, fg=HEADER_FG,
                  font=FONT_BOLD).pack(side="left", padx=10)
 
         # ── Prospected asteroid section ───────────────────────────────────
         self._section("CURRENT ASTEROID")
-        ast = tk.Frame(self, bg=PANEL_BG)
+        ast = tk.Frame(self._panel_body, bg=PANEL_BG)
         ast.pack(fill="x", padx=4, pady=(0, 4))
         ast.columnconfigure(1, weight=1)
 
@@ -80,13 +88,13 @@ class MiningPanel(BasePanel):
 
         # Materials list
         self._section("MATERIALS")
-        mat_outer = tk.Frame(self, bg=PANEL_BG)
+        mat_outer = tk.Frame(self._panel_body, bg=PANEL_BG)
         mat_outer.pack(fill="x", padx=4, pady=(0, 4))
         self._mat_frame = mat_outer
 
         # ── Refined cargo section ─────────────────────────────────────────
         self._section("REFINED CARGO")
-        cargo_outer = tk.Frame(self, bg=PANEL_BG)
+        cargo_outer = tk.Frame(self._panel_body, bg=PANEL_BG)
         cargo_outer.pack(fill="x", padx=4, pady=(0, 4))
         cargo_outer.columnconfigure(1, weight=1)
 
@@ -112,7 +120,7 @@ class MiningPanel(BasePanel):
 
         # ── Stats bar ─────────────────────────────────────────────────────
         self._section("SESSION STATS")
-        stats = tk.Frame(self, bg=PANEL_BG)
+        stats = tk.Frame(self._panel_body, bg=PANEL_BG)
         stats.pack(fill="x", padx=4, pady=(0, 4))
 
         tk.Label(stats, text="Cracked:", bg=PANEL_BG, fg=ACCENT_FG,
@@ -135,7 +143,7 @@ class MiningPanel(BasePanel):
 
         # ── Quick actions ─────────────────────────────────────────────────
         self._section("QUICK ACTIONS")
-        acts = tk.Frame(self, bg=PANEL_BG)
+        acts = tk.Frame(self._panel_body, bg=PANEL_BG)
         acts.pack(fill="x", padx=4, pady=(0, 8))
 
         _BTN = dict(bg="#1a1a3a", fg=ACCENT_FG, activebackground="#2a2a5a",
@@ -179,10 +187,14 @@ class MiningPanel(BasePanel):
         self._cargo: dict[str, int] = {}
         self._cargo_capacity: float = 0.0
 
+        self.after_idle(self._scroll.refresh_layout)
+
     # ── Event dispatch ─────────────────────────────────────────────────────
 
     def on_event(self, event: str, data: dict) -> None:
-        if event == "ProspectedAsteroid":
+        if event == "StateSnapshot":
+            self._load_snapshot(data)
+        elif event == "ProspectedAsteroid":
             self._on_prospected(data)
         elif event == "AsteroidCracked":
             self._n_cracked += 1
@@ -196,6 +208,31 @@ class MiningPanel(BasePanel):
             self._on_status(data)
 
     # ── Internal handlers ──────────────────────────────────────────────────
+
+    def _load_snapshot(self, data: dict) -> None:
+        asteroid = data.get("asteroid", {})
+        if asteroid:
+            self._on_prospected(asteroid)
+
+        counters = data.get("counters", {})
+        self._n_cracked = int(counters.get("cracked", 0))
+        self._n_collectors = int(counters.get("collectors", 0))
+        self._n_prospectors = int(counters.get("prospectors", 0))
+        self._lbl_cracked.config(text=str(self._n_cracked))
+        self._lbl_collectors.config(text=str(self._n_collectors))
+        self._lbl_prospectors.config(text=str(self._n_prospectors))
+
+        self._cargo = {
+            str(k): int(v) for k, v in data.get("cargo_tally", {}).items()
+        }
+        self._rebuild_cargo()
+
+        max_observed = float(data.get("max_cargo_observed", 0.0))
+        self._cargo_capacity = max(self._cargo_capacity, max_observed)
+
+        status = data.get("status", {})
+        if status:
+            self._on_status(status)
 
     def _on_prospected(self, data: dict) -> None:
         content    = data.get("content", "")
@@ -270,11 +307,12 @@ class MiningPanel(BasePanel):
             tk.Label(self._cargo_frame, text=f"{count} t",
                      bg=PANEL_BG, fg=ACCENT_FG, font=FONT_BOLD
                      ).grid(row=i, column=1, sticky="w")
+        self.after_idle(self._scroll.refresh_layout)
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
     def _section(self, title: str) -> None:
-        hdr = tk.Frame(self, bg="#2a2a4a", pady=1)
+        hdr = tk.Frame(self._panel_body, bg="#2a2a4a", pady=1)
         hdr.pack(fill="x", pady=(4, 0))
         tk.Label(hdr, text=f"  {title}", bg="#2a2a4a", fg=HEADER_FG,
                  font=FONT_BOLD, anchor="w").pack(fill="x", padx=4, pady=2)

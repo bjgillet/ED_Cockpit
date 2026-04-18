@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from client.GUI.scrollable_panel import ScrollablePanelContainer
 from client.roles.base_panel import BasePanel
 from shared.roles_def import Role
 
@@ -37,16 +38,23 @@ class NavigationPanel(BasePanel):
 
     def _build_ui(self) -> None:
         self.configure(style="TFrame")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self._scroll = ScrollablePanelContainer(self, bg=BG)
+        self._scroll.grid(row=0, column=0, sticky="nsew")
+        self._panel_body = self._scroll.body
+        self._scroll.bind_mousewheel_targets(self, self._scroll.canvas, self._panel_body)
 
         # ── Header ────────────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=HEADER_BG, pady=4)
+        hdr = tk.Frame(self._panel_body, bg=HEADER_BG, pady=4)
         hdr.pack(fill="x")
         tk.Label(hdr, text="SURFACE NAVIGATION", bg=HEADER_BG, fg=HEADER_FG,
                  font=FONT_BOLD).pack(side="left", padx=10)
 
         # ── Body status ───────────────────────────────────────────────────
         self._section("CURRENT BODY")
-        body = tk.Frame(self, bg=PANEL_BG)
+        body = tk.Frame(self._panel_body, bg=PANEL_BG)
         body.pack(fill="x", padx=4, pady=(0, 4))
         body.columnconfigure(1, weight=1)
 
@@ -56,7 +64,7 @@ class NavigationPanel(BasePanel):
 
         # ── Landing coordinates ───────────────────────────────────────────
         self._section("LANDING COORDINATES")
-        coords = tk.Frame(self, bg=PANEL_BG)
+        coords = tk.Frame(self._panel_body, bg=PANEL_BG)
         coords.pack(fill="x", padx=4, pady=(0, 4))
         coords.columnconfigure(1, weight=1)
 
@@ -66,7 +74,7 @@ class NavigationPanel(BasePanel):
 
         # ── Live position (Status.json) ───────────────────────────────────
         self._section("LIVE POSITION")
-        pos = tk.Frame(self, bg=PANEL_BG)
+        pos = tk.Frame(self._panel_body, bg=PANEL_BG)
         pos.pack(fill="x", padx=4, pady=(0, 4))
         pos.columnconfigure(1, weight=1)
 
@@ -78,7 +86,7 @@ class NavigationPanel(BasePanel):
 
         # ── Surface signals ───────────────────────────────────────────────
         self._section("DSS SURFACE SIGNALS")
-        sig_outer = tk.Frame(self, bg=PANEL_BG)
+        sig_outer = tk.Frame(self._panel_body, bg=PANEL_BG)
         sig_outer.pack(fill="x", padx=4, pady=(0, 4))
 
         self._signals_frame = sig_outer
@@ -87,7 +95,7 @@ class NavigationPanel(BasePanel):
 
         # ── Biology genuses ───────────────────────────────────────────────
         self._section("BIOLOGICAL SIGNALS")
-        gen_outer = tk.Frame(self, bg=PANEL_BG)
+        gen_outer = tk.Frame(self._panel_body, bg=PANEL_BG)
         gen_outer.pack(fill="x", padx=4, pady=(0, 4))
 
         self._genuses_frame = gen_outer
@@ -96,7 +104,7 @@ class NavigationPanel(BasePanel):
 
         # ── Quick actions ─────────────────────────────────────────────────
         self._section("QUICK ACTIONS")
-        acts = tk.Frame(self, bg=PANEL_BG)
+        acts = tk.Frame(self._panel_body, bg=PANEL_BG)
         acts.pack(fill="x", padx=4, pady=(0, 8))
 
         _BTN = dict(bg="#1a1a3a", fg=ACCENT, activebackground="#2a2a5a",
@@ -128,6 +136,7 @@ class NavigationPanel(BasePanel):
         tk.Button(row2, text="Recall / Dismiss Ship",
                   command=lambda: self.send_action("key_press", "recall_dismiss_ship"),
                   **_BTN).pack(side="left", padx=3)
+        self.after_idle(self._scroll.refresh_layout)
 
     # ── Event dispatch ─────────────────────────────────────────────────────
 
@@ -158,6 +167,7 @@ class NavigationPanel(BasePanel):
             self._clear_frame(self._genuses_frame)
             tk.Label(self._genuses_frame, text="  None detected",
                      bg=PANEL_BG, fg=GREY_FG, font=FONT_TINY).pack(anchor="w")
+        self.after_idle(self._scroll.refresh_layout)
 
     def _on_touchdown_liftoff(self, event: str, data: dict) -> None:
         lat  = data.get("latitude",  0.0)
@@ -205,6 +215,7 @@ class NavigationPanel(BasePanel):
         else:
             tk.Label(self._genuses_frame, text="  None detected",
                      bg=PANEL_BG, fg=GREY_FG, font=FONT_TINY).pack(anchor="w")
+        self.after_idle(self._scroll.refresh_layout)
 
     def _on_status(self, data: dict) -> None:
         lat  = float(data.get("latitude",  0.0))
@@ -237,7 +248,7 @@ class NavigationPanel(BasePanel):
         setattr(self, attr, lbl)
 
     def _section(self, title: str) -> None:
-        bar = tk.Frame(self, bg="#2a2a4a", pady=1)
+        bar = tk.Frame(self._panel_body, bg="#2a2a4a", pady=1)
         bar.pack(fill="x", pady=(4, 0))
         tk.Label(bar, text=f"  {title}", bg="#2a2a4a", fg=HEADER_FG,
                  font=FONT_BOLD, anchor="w").pack(fill="x", padx=4, pady=2)
