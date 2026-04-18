@@ -450,7 +450,6 @@ class MiningRole(BaseRole):
             "event": "Docked",
             "station": data.get("StationName", ""),
             "system": data.get("StarSystem", ""),
-            "available_limpets": self._available_limpets,
         }
 
     @staticmethod

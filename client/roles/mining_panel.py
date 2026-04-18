@@ -356,7 +356,6 @@ class MiningPanel(BasePanel):
         self._lbl_cracked.config(text="0")
         self._lbl_collectors.config(text="0")
         self._lbl_prospectors.config(text="0")
-        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
         self._lbl_limpets.config(text=str(self._available_limpets))
         self.after_idle(self._scroll.refresh_layout)
 
