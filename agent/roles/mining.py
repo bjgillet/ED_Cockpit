@@ -182,7 +182,7 @@ class MiningRole(BaseRole):
                 self._last_status["cargo"] = used_f
                 changed = True
             limpets = self._extract_limpets(inv_map)
-            if limpets != self._available_limpets:
+            if limpets is not None and limpets != self._available_limpets:
                 self._available_limpets = limpets
                 changed = True
 
@@ -211,10 +211,14 @@ class MiningRole(BaseRole):
             self._tracked_refined = {str(name) for name in tracked if str(name)}
 
         counters = saved.get("counters", {})
-        self._n_cracked = int(counters.get("cracked", 0))
-        self._n_collectors = int(counters.get("collectors", 0))
-        self._n_prospectors = int(counters.get("prospectors", 0))
-        self._available_limpets = int(counters.get("available_limpets", 0))
+        if not isinstance(counters, dict):
+            counters = {}
+        self._n_cracked = self._to_int(counters.get("cracked"), default=0)
+        self._n_collectors = self._to_int(counters.get("collectors"), default=0)
+        self._n_prospectors = self._to_int(counters.get("prospectors"), default=0)
+        # Backward compatibility: support old typo key "avaiable_limpets".
+        raw_limpets = counters.get("available_limpets", counters.get("avaiable_limpets"))
+        self._available_limpets = self._to_int(raw_limpets, default=0)
 
         status = saved.get("status", {})
         self._last_status = {
@@ -459,3 +463,12 @@ class MiningRole(BaseRole):
             if ("limpet" in k) or ("drone" in k):
                 return int(value)
         return None
+
+    @staticmethod
+    def _to_int(value, default: int = 0) -> int:
+        try:
+            if value is None:
+                return default
+            return int(value)
+        except (TypeError, ValueError):
+            return default
