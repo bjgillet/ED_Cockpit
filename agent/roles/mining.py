@@ -75,6 +75,7 @@ Wire payload shapes
 Status payload (filter_status) →
     {
       "cargo":          <float t>,
+      "cargo_capacity": <float t>,
       "cargo_scoop":    <bool>,
     }
 """
@@ -105,6 +106,8 @@ class MiningRole(BaseRole):
         "ProspectedAsteroid",
         "MiningRefined",
         "LaunchDrone",
+        "Loadout",
+        "Cargo",
     })
 
     def __init__(self) -> None:
@@ -121,8 +124,8 @@ class MiningRole(BaseRole):
         self._n_cracked: int = 0
         self._n_collectors: int = 0
         self._n_prospectors: int = 0
+        self._cargo_capacity: float = 0.0
         self._last_status: dict = {"cargo": 0.0, "cargo_scoop": False}
-        self._max_cargo_observed: float = 0.0
 
         self._load_state()
 
@@ -131,6 +134,42 @@ class MiningRole(BaseRole):
         if sys.platform == "win32":
             return Path.home() / "AppData" / "Roaming" / "ed-cockpit"
         return Path.home() / ".config" / "ed-cockpit"
+
+    def sync_from_journal_memory(self, snapshot: dict) -> None:
+        """
+        Seed cargo capacity/usage from EDApp journal memory bootstrap.
+
+        This helps initialise the gauge correctly even when the current
+        runtime has not yet emitted fresh Loadout/Cargo journal events.
+        """
+        changed = False
+        ship = snapshot.get("ship", {}) if isinstance(snapshot, dict) else {}
+        location_inv = snapshot.get("cargo_inventory", []) if isinstance(snapshot, dict) else []
+
+        try:
+            cap = float(ship.get("cargo_capacity", 0.0))
+        except (TypeError, ValueError):
+            cap = 0.0
+        if cap > 0 and cap != self._cargo_capacity:
+            self._cargo_capacity = cap
+            changed = True
+
+        if isinstance(location_inv, list):
+            used = 0
+            for item in location_inv:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    used += int(item.get("Count", 0))
+                except (TypeError, ValueError):
+                    continue
+            used_f = float(used)
+            if used_f != float(self._last_status.get("cargo", 0.0)):
+                self._last_status["cargo"] = used_f
+                changed = True
+
+        if changed:
+            self._save_state()
 
     def _load_state(self) -> None:
         try:
@@ -160,7 +199,7 @@ class MiningRole(BaseRole):
             "cargo": float(status.get("cargo", 0.0)),
             "cargo_scoop": bool(status.get("cargo_scoop", False)),
         }
-        self._max_cargo_observed = float(saved.get("max_cargo_observed", 0.0))
+        self._cargo_capacity = float(saved.get("cargo_capacity", 0.0))
 
         log.info("MiningRole: state loaded from %s", self._state_path)
 
@@ -176,7 +215,7 @@ class MiningRole(BaseRole):
                     "prospectors": self._n_prospectors,
                 },
                 "status": dict(self._last_status),
-                "max_cargo_observed": self._max_cargo_observed,
+                "cargo_capacity": self._cargo_capacity,
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
             self._state_path.write_text(
@@ -196,6 +235,7 @@ class MiningRole(BaseRole):
             bool(self._last_asteroid.get("content")),
             bool(self._last_asteroid.get("motherlode")),
             float(self._last_status.get("cargo", 0.0)) > 0.0,
+            self._cargo_capacity > 0.0,
             bool(self._last_status.get("cargo_scoop", False)),
         ])
         if not has_state:
@@ -209,7 +249,7 @@ class MiningRole(BaseRole):
                 "prospectors": self._n_prospectors,
             },
             "status": dict(self._last_status),
-            "max_cargo_observed": self._max_cargo_observed,
+            "cargo_capacity": self._cargo_capacity,
         }
 
     def filter(self, event_name: str, data: dict) -> dict | None:
@@ -221,17 +261,21 @@ class MiningRole(BaseRole):
             return self._handle_refined(data)
         if event_name == "LaunchDrone":
             return self._handle_launch_drone(data)
+        if event_name == "Loadout":
+            return self._handle_loadout(data)
+        if event_name == "Cargo":
+            return self._handle_cargo(data)
         return None
 
     def filter_status(self, status: dict) -> dict | None:
         flags = int(status.get("Flags", 0))
         payload = {
             "cargo":       float(status.get("Cargo", 0.0)),
+            "cargo_capacity": self._cargo_capacity,
             "cargo_scoop": bool(flags & _FLAG_CARGO_SCOOP),
         }
         changed = payload != self._last_status
         self._last_status = payload
-        self._max_cargo_observed = max(self._max_cargo_observed, payload["cargo"])
         if changed:
             self._save_state()
         return payload
@@ -290,3 +334,34 @@ class MiningRole(BaseRole):
         }
         self._save_state()
         return payload
+
+    def _handle_loadout(self, data: dict) -> dict:
+        self._cargo_capacity = float(data.get("CargoCapacity", 0.0))
+        self._save_state()
+        return {
+            "event": "Loadout",
+            "ship": data.get("Ship", ""),
+            "ship_name": data.get("ShipName", ""),
+            "cargo_capacity": self._cargo_capacity,
+            "hull_health": float(data.get("HullHealth", 0.0)),
+            "fuel_capacity": data.get("FuelCapacity", {}),
+        }
+
+    def _handle_cargo(self, data: dict) -> dict:
+        inventory = data.get("Inventory", [])
+        used = 0
+        if isinstance(inventory, list):
+            for item in inventory:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    used += int(item.get("Count", 0))
+                except (TypeError, ValueError):
+                    continue
+        self._last_status["cargo"] = float(used)
+        self._save_state()
+        return {
+            "event": "Cargo",
+            "cargo": float(used),
+            "inventory": inventory if isinstance(inventory, list) else [],
+        }

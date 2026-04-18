@@ -28,6 +28,7 @@ class ScrollablePanelContainer(tk.Frame):
 
         self.body = tk.Frame(self.canvas, bg=bg)
         self._canvas_window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self._refresh_scheduled = False
 
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.body.bind("<Configure>", self._on_body_configure)
@@ -43,8 +44,7 @@ class ScrollablePanelContainer(tk.Frame):
             widget.bind("<Shift-Button-5>", self._on_linux_shift_wheel_down, add="+")
 
     def refresh_layout(self) -> None:
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        self._update_scrollbars()
+        self._schedule_refresh()
 
     def _can_scroll_vertically(self) -> bool:
         return self.v_scroll.winfo_ismapped()
@@ -113,23 +113,30 @@ class ScrollablePanelContainer(tk.Frame):
         self._update_scrollbars()
 
     def _on_body_configure(self, _event=None) -> None:
+        self._schedule_refresh()
+
+    def _on_canvas_configure(self, _event=None) -> None:
+        self._schedule_refresh()
+
+    def _schedule_refresh(self) -> None:
+        if self._refresh_scheduled:
+            return
+        self._refresh_scheduled = True
+        self.after_idle(self._run_refresh)
+
+    def _run_refresh(self) -> None:
+        self._refresh_scheduled = False
+        self._fit_body_to_viewport()
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         self._update_scrollbars()
 
-    def _on_canvas_configure(self, _event=None) -> None:
-        self._update_scrollbars()
-
     def _update_scrollbars(self) -> None:
-        bbox = self.canvas.bbox("all")
-        if not bbox:
-            self.v_scroll.grid_remove()
-            self.h_scroll.grid_remove()
-            return
-
-        content_w = bbox[2] - bbox[0]
-        content_h = bbox[3] - bbox[1]
+        content_w = self.body.winfo_reqwidth()
+        content_h = self.body.winfo_reqheight()
         viewport_w = self.canvas.winfo_width()
         viewport_h = self.canvas.winfo_height()
+        if viewport_w <= 1 or viewport_h <= 1:
+            return
 
         show_h = content_w > viewport_w
         show_v = content_h > viewport_h
@@ -145,3 +152,21 @@ class ScrollablePanelContainer(tk.Frame):
         else:
             self.h_scroll.grid_remove()
             self.canvas.xview_moveto(0)
+
+        # Re-apply fitting after scrollbar visibility changes since viewport
+        # dimensions can change when scrollbars are shown/hidden.
+        self._fit_body_to_viewport()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _fit_body_to_viewport(self) -> None:
+        viewport_w = self.canvas.winfo_width()
+        viewport_h = self.canvas.winfo_height()
+        if viewport_w <= 1 or viewport_h <= 1:
+            return
+        req_w = self.body.winfo_reqwidth()
+        req_h = self.body.winfo_reqheight()
+        self.canvas.itemconfigure(
+            self._canvas_window,
+            width=max(req_w, viewport_w),
+            height=max(req_h, viewport_h),
+        )

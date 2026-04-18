@@ -306,6 +306,10 @@ class EDApp:
             self._journal.set_path(journal_path)
             self._status.set_path(state.get("status_path"))
             self._journal_memory.warm_from_journal(journal_path)
+            memory_snapshot = self._journal_memory.snapshot()
+            mining_role = self._roles.get("mining")
+            if mining_role and hasattr(mining_role, "sync_from_journal_memory"):
+                mining_role.sync_from_journal_memory(memory_snapshot)
             if journal_path:
                 journal_dir = Path(journal_path).parent
                 exo_role = self._roles.get("exobiology")

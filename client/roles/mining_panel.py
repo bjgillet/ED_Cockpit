@@ -13,6 +13,7 @@ Displays live mining data received from the agent:
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 
 from client.GUI.scrollable_panel import ScrollablePanelContainer
 from client.roles.base_panel import BasePanel
@@ -38,9 +39,6 @@ _CONTENT_COLORS = {
 }
 
 _BAR_W = 160
-_BAR_H = 10
-
-
 class MiningPanel(BasePanel):
     """Live mining panel: asteroid composition + refined ore tally."""
     _debug = False
@@ -102,12 +100,18 @@ class MiningPanel(BasePanel):
         tk.Label(cargo_outer, text="Cargo:", bg=PANEL_BG, fg=ACCENT_FG,
                  font=FONT_BOLD, anchor="w"
                  ).grid(row=0, column=0, sticky="w", padx=8, pady=2)
-        self._cargo_bar_canvas = tk.Canvas(
-            cargo_outer, width=_BAR_W, height=_BAR_H, bg=PANEL_BG,
-            highlightthickness=0)
-        self._cargo_bar_canvas.grid(row=0, column=1, sticky="w", pady=2)
+        self._cargo_var = tk.DoubleVar(value=0.0)
+        self._cargo_bar = ttk.Progressbar(
+            cargo_outer,
+            orient="horizontal",
+            mode="determinate",
+            length=_BAR_W,
+            variable=self._cargo_var,
+            maximum=1.0,
+        )
+        self._cargo_bar.grid(row=0, column=1, sticky="w", pady=2)
         self._lbl_cargo_live = tk.Label(
-            cargo_outer, text="— t", bg=PANEL_BG, fg=TEXT_FG, font=FONT_PATH)
+            cargo_outer, text="0 t / 0 t", bg=PANEL_BG, fg=TEXT_FG, font=FONT_PATH)
         self._lbl_cargo_live.grid(row=0, column=2, sticky="w", padx=4, pady=2)
 
         # Ore breakdown sub-frame
@@ -185,6 +189,7 @@ class MiningPanel(BasePanel):
         self._n_collectors  = 0
         self._n_prospectors = 0
         self._cargo: dict[str, int] = {}
+        self._cargo_used: float = 0.0
         self._cargo_capacity: float = 0.0
 
         self.after_idle(self._scroll.refresh_layout)
@@ -206,6 +211,10 @@ class MiningPanel(BasePanel):
             self._on_drone(data)
         elif event == "Status":
             self._on_status(data)
+        elif event == "Loadout":
+            self._on_loadout(data)
+        elif event == "Cargo":
+            self._on_cargo(data)
 
     # ── Internal handlers ──────────────────────────────────────────────────
 
@@ -227,12 +236,13 @@ class MiningPanel(BasePanel):
         }
         self._rebuild_cargo()
 
-        max_observed = float(data.get("max_cargo_observed", 0.0))
-        self._cargo_capacity = max(self._cargo_capacity, max_observed)
+        self._cargo_capacity = float(data.get("cargo_capacity", self._cargo_capacity))
 
         status = data.get("status", {})
         if status:
             self._on_status(status)
+        else:
+            self._update_cargo_gauge()
 
     def _on_prospected(self, data: dict) -> None:
         content    = data.get("content", "")
@@ -276,25 +286,28 @@ class MiningPanel(BasePanel):
             self._lbl_prospectors.config(text=str(self._n_prospectors))
 
     def _on_status(self, data: dict) -> None:
-        cargo = float(data.get("cargo", 0.0))
-        # Track maximum observed cargo as a proxy for capacity
-        if cargo > self._cargo_capacity:
-            self._cargo_capacity = cargo
-        frac = (cargo / self._cargo_capacity
-                if self._cargo_capacity > 0 else 0.0)
-        color = GREEN_FG if frac < 0.75 else (
-            ORANGE_FG if frac < 0.95 else RED_FG)
-        self._draw_bar(self._cargo_bar_canvas, frac, color)
-        self._lbl_cargo_live.config(text=f"{cargo:.0f} t")
+        self._cargo_used = float(data.get("cargo", self._cargo_used))
+        capacity = float(data.get("cargo_capacity", 0.0))
+        if capacity > 0:
+            self._cargo_capacity = capacity
+        self._update_cargo_gauge()
 
-    @staticmethod
-    def _draw_bar(canvas: tk.Canvas, frac: float, color: str) -> None:
-        canvas.delete("all")
-        canvas.create_rectangle(0, 0, _BAR_W, _BAR_H,
-                                 fill="#222244", outline="")
-        fill_w = max(1, int(_BAR_W * max(0.0, min(1.0, frac))))
-        canvas.create_rectangle(0, 0, fill_w, _BAR_H,
-                                 fill=color, outline="")
+    def _on_loadout(self, data: dict) -> None:
+        capacity = float(data.get("cargo_capacity", 0.0))
+        if capacity > 0:
+            self._cargo_capacity = capacity
+        self._update_cargo_gauge()
+
+    def _on_cargo(self, data: dict) -> None:
+        self._cargo_used = float(data.get("cargo", self._cargo_used))
+        self._update_cargo_gauge()
+
+    def _update_cargo_gauge(self) -> None:
+        capacity = max(self._cargo_capacity, 0.0)
+        used = max(self._cargo_used, 0.0)
+        self._cargo_bar.configure(maximum=capacity if capacity > 0 else 1.0)
+        self._cargo_var.set(min(used, capacity) if capacity > 0 else 0.0)
+        self._lbl_cargo_live.config(text=f"{used:.0f} t / {capacity:.0f} t")
 
     def _rebuild_cargo(self) -> None:
         for w in self._cargo_frame.winfo_children():
