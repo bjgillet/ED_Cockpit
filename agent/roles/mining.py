@@ -42,6 +42,10 @@ Events handled
                         hopper into cargo.
   LaunchDrone        — drone (limpet) launched; we forward only
                         Collector and Prospector subtypes.
+  Cargo              — full cargo inventory snapshot; used to reconcile
+                       refined-material counts and remaining limpets.
+  Loadout            — ship loadout snapshot; used to capture cargo capacity.
+  Docked             — reset transient mining session sections.
 
 Wire payload shapes
 -------------------
@@ -76,6 +80,7 @@ Status payload (filter_status) →
     {
       "cargo":          <float t>,
       "cargo_capacity": <float t>,
+      "available_limpets": <int>,
       "cargo_scoop":    <bool>,
     }
 """
@@ -108,6 +113,7 @@ class MiningRole(BaseRole):
         "LaunchDrone",
         "Loadout",
         "Cargo",
+        "Docked",
     })
 
     def __init__(self) -> None:
@@ -121,9 +127,11 @@ class MiningRole(BaseRole):
             "remaining": 1.0,
         }
         self._cargo_tally: dict[str, int] = {}
+        self._tracked_refined: set[str] = set()
         self._n_cracked: int = 0
         self._n_collectors: int = 0
         self._n_prospectors: int = 0
+        self._available_limpets: int = 0
         self._cargo_capacity: float = 0.0
         self._last_status: dict = {"cargo": 0.0, "cargo_scoop": False}
 
@@ -156,16 +164,26 @@ class MiningRole(BaseRole):
 
         if isinstance(location_inv, list):
             used = 0
+            inv_map: dict[str, int] = {}
             for item in location_inv:
                 if not isinstance(item, dict):
                     continue
                 try:
-                    used += int(item.get("Count", 0))
+                    count = int(item.get("Count", 0))
                 except (TypeError, ValueError):
                     continue
+                count = max(count, 0)
+                used += count
+                name = item.get("Name_Localised") or item.get("Name", "")
+                if name:
+                    inv_map[str(name)] = count
             used_f = float(used)
             if used_f != float(self._last_status.get("cargo", 0.0)):
                 self._last_status["cargo"] = used_f
+                changed = True
+            limpets = self._extract_limpets(inv_map)
+            if limpets != self._available_limpets:
+                self._available_limpets = limpets
                 changed = True
 
         if changed:
@@ -188,11 +206,15 @@ class MiningRole(BaseRole):
         self._cargo_tally = {
             str(k): int(v) for k, v in saved.get("cargo_tally", {}).items()
         }
+        tracked = saved.get("tracked_refined", [])
+        if isinstance(tracked, list):
+            self._tracked_refined = {str(name) for name in tracked if str(name)}
 
         counters = saved.get("counters", {})
         self._n_cracked = int(counters.get("cracked", 0))
         self._n_collectors = int(counters.get("collectors", 0))
         self._n_prospectors = int(counters.get("prospectors", 0))
+        self._available_limpets = int(counters.get("available_limpets", 0))
 
         status = saved.get("status", {})
         self._last_status = {
@@ -209,10 +231,12 @@ class MiningRole(BaseRole):
             state = {
                 "asteroid": dict(self._last_asteroid),
                 "cargo_tally": dict(self._cargo_tally),
+                "tracked_refined": sorted(self._tracked_refined),
                 "counters": {
                     "cracked": self._n_cracked,
                     "collectors": self._n_collectors,
                     "prospectors": self._n_prospectors,
+                    "available_limpets": self._available_limpets,
                 },
                 "status": dict(self._last_status),
                 "cargo_capacity": self._cargo_capacity,
@@ -231,6 +255,7 @@ class MiningRole(BaseRole):
             self._n_cracked > 0,
             self._n_collectors > 0,
             self._n_prospectors > 0,
+            self._available_limpets > 0,
             bool(self._last_asteroid.get("materials")),
             bool(self._last_asteroid.get("content")),
             bool(self._last_asteroid.get("motherlode")),
@@ -247,6 +272,7 @@ class MiningRole(BaseRole):
                 "cracked": self._n_cracked,
                 "collectors": self._n_collectors,
                 "prospectors": self._n_prospectors,
+                "available_limpets": self._available_limpets,
             },
             "status": dict(self._last_status),
             "cargo_capacity": self._cargo_capacity,
@@ -265,13 +291,21 @@ class MiningRole(BaseRole):
             return self._handle_loadout(data)
         if event_name == "Cargo":
             return self._handle_cargo(data)
+        if event_name == "Docked":
+            return self._handle_docked(data)
         return None
 
     def filter_status(self, status: dict) -> dict | None:
         flags = int(status.get("Flags", 0))
+        cargo_value = (
+            float(status["Cargo"])
+            if "Cargo" in status
+            else float(self._last_status.get("cargo", 0.0))
+        )
         payload = {
-            "cargo":       float(status.get("Cargo", 0.0)),
+            "cargo":       cargo_value,
             "cargo_capacity": self._cargo_capacity,
+            "available_limpets": self._available_limpets,
             "cargo_scoop": bool(flags & _FLAG_CARGO_SCOOP),
         }
         changed = payload != self._last_status
@@ -312,6 +346,7 @@ class MiningRole(BaseRole):
     def _handle_refined(self, data: dict) -> dict:
         ore = data.get("Type_Localised") or data.get("Type", "")
         if ore:
+            self._tracked_refined.add(ore)
             self._cargo_tally[ore] = self._cargo_tally.get(ore, 0) + 1
         payload = {
             "event": "MiningRefined",
@@ -326,11 +361,16 @@ class MiningRole(BaseRole):
             return None
         if drone_type == "Collection":
             self._n_collectors += 1
+            if self._available_limpets > 0:
+                self._available_limpets -= 1
         elif drone_type == "Prospector":
             self._n_prospectors += 1
+            if self._available_limpets > 0:
+                self._available_limpets -= 1
         payload = {
             "event":      "LaunchDrone",
             "drone_type": drone_type,
+            "available_limpets": self._available_limpets,
         }
         self._save_state()
         return payload
@@ -349,19 +389,64 @@ class MiningRole(BaseRole):
 
     def _handle_cargo(self, data: dict) -> dict:
         inventory = data.get("Inventory", [])
+        inv_map: dict[str, int] = {}
         used = 0
         if isinstance(inventory, list):
             for item in inventory:
                 if not isinstance(item, dict):
                     continue
                 try:
-                    used += int(item.get("Count", 0))
+                    count = int(item.get("Count", 0))
                 except (TypeError, ValueError):
                     continue
+                count = max(count, 0)
+                used += count
+                name = item.get("Name_Localised") or item.get("Name", "")
+                if name:
+                    inv_map[str(name)] = count
         self._last_status["cargo"] = float(used)
+
+        # Keep refined tally aligned with real cargo inventory:
+        # if cargo is sold/transferred/refuelled, tracked materials decrease too.
+        for name in list(self._tracked_refined):
+            current = int(inv_map.get(name, 0))
+            if current <= 0:
+                self._cargo_tally.pop(name, None)
+            else:
+                self._cargo_tally[name] = current
+
+        self._available_limpets = self._extract_limpets(inv_map)
         self._save_state()
         return {
             "event": "Cargo",
             "cargo": float(used),
+            "available_limpets": self._available_limpets,
+            "refined_cargo_tally": dict(self._cargo_tally),
             "inventory": inventory if isinstance(inventory, list) else [],
         }
+
+    def _handle_docked(self, data: dict) -> dict:
+        self._last_asteroid = {
+            "materials": [],
+            "content": "",
+            "motherlode": "",
+            "remaining": 1.0,
+        }
+        self._n_cracked = 0
+        self._n_collectors = 0
+        self._n_prospectors = 0
+        self._save_state()
+        return {
+            "event": "Docked",
+            "station": data.get("StationName", ""),
+            "system": data.get("StarSystem", ""),
+            "available_limpets": self._available_limpets,
+        }
+
+    @staticmethod
+    def _extract_limpets(inv_map: dict[str, int]) -> int:
+        for key, value in inv_map.items():
+            k = key.strip().lower()
+            if k in ("limpet", "drones"):
+                return int(value)
+        return 0

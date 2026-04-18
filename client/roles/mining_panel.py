@@ -46,6 +46,7 @@ class MiningPanel(BasePanel):
 
     def _build_ui(self) -> None:
         self.configure(style="TFrame")
+        self._init_progress_styles()
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
 
@@ -108,6 +109,7 @@ class MiningPanel(BasePanel):
             length=_BAR_W,
             variable=self._cargo_var,
             maximum=1.0,
+            style="MiningGreen.Horizontal.TProgressbar",
         )
         self._cargo_bar.grid(row=0, column=1, sticky="w", pady=2)
         self._lbl_cargo_live = tk.Label(
@@ -144,6 +146,12 @@ class MiningPanel(BasePanel):
         self._lbl_prospectors = tk.Label(stats, text="0", bg=PANEL_BG, fg=TEXT_FG,
                                          font=FONT_BODY)
         self._lbl_prospectors.pack(side="left")
+
+        tk.Label(stats, text="Available Limpets:", bg=PANEL_BG, fg=ACCENT_FG,
+                 font=FONT_BOLD).pack(side="left", padx=(16, 2))
+        self._lbl_limpets = tk.Label(stats, text="0", bg=PANEL_BG, fg=TEXT_FG,
+                                     font=FONT_BODY)
+        self._lbl_limpets.pack(side="left")
 
         # ── Quick actions ─────────────────────────────────────────────────
         self._section("QUICK ACTIONS")
@@ -191,6 +199,7 @@ class MiningPanel(BasePanel):
         self._cargo: dict[str, int] = {}
         self._cargo_used: float = 0.0
         self._cargo_capacity: float = 0.0
+        self._available_limpets: int = 0
 
         self.after_idle(self._scroll.refresh_layout)
 
@@ -215,6 +224,8 @@ class MiningPanel(BasePanel):
             self._on_loadout(data)
         elif event == "Cargo":
             self._on_cargo(data)
+        elif event == "Docked":
+            self._on_docked(data)
 
     # ── Internal handlers ──────────────────────────────────────────────────
 
@@ -230,6 +241,8 @@ class MiningPanel(BasePanel):
         self._lbl_cracked.config(text=str(self._n_cracked))
         self._lbl_collectors.config(text=str(self._n_collectors))
         self._lbl_prospectors.config(text=str(self._n_prospectors))
+        self._available_limpets = int(counters.get("available_limpets", 0))
+        self._lbl_limpets.config(text=str(self._available_limpets))
 
         self._cargo = {
             str(k): int(v) for k, v in data.get("cargo_tally", {}).items()
@@ -281,15 +294,25 @@ class MiningPanel(BasePanel):
         if drone_type == "Collection":
             self._n_collectors += 1
             self._lbl_collectors.config(text=str(self._n_collectors))
+            if self._available_limpets > 0:
+                self._available_limpets -= 1
         elif drone_type == "Prospector":
             self._n_prospectors += 1
             self._lbl_prospectors.config(text=str(self._n_prospectors))
+            if self._available_limpets > 0:
+                self._available_limpets -= 1
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
 
     def _on_status(self, data: dict) -> None:
-        self._cargo_used = float(data.get("cargo", self._cargo_used))
+        cargo_val = data.get("cargo")
+        if cargo_val is not None:
+            self._cargo_used = float(cargo_val)
         capacity = float(data.get("cargo_capacity", 0.0))
         if capacity > 0:
             self._cargo_capacity = capacity
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
         self._update_cargo_gauge()
 
     def _on_loadout(self, data: dict) -> None:
@@ -299,8 +322,43 @@ class MiningPanel(BasePanel):
         self._update_cargo_gauge()
 
     def _on_cargo(self, data: dict) -> None:
-        self._cargo_used = float(data.get("cargo", self._cargo_used))
+        cargo_val = data.get("cargo")
+        if cargo_val is not None:
+            self._cargo_used = float(cargo_val)
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
+        tally = data.get("refined_cargo_tally")
+        if isinstance(tally, dict):
+            cleaned: dict[str, int] = {}
+            for k, v in tally.items():
+                try:
+                    count = int(v)
+                except (TypeError, ValueError):
+                    continue
+                if count > 0:
+                    cleaned[str(k)] = count
+            self._cargo = cleaned
+            self._rebuild_cargo()
         self._update_cargo_gauge()
+
+    def _on_docked(self, data: dict) -> None:
+        self._lbl_content.config(text="—", fg=TEXT_FG)
+        self._lbl_motherlode.config(text="—", fg=TEXT_FG)
+        self._lbl_remaining.config(text="—")
+        for w in self._mat_frame.winfo_children():
+            w.destroy()
+        tk.Label(self._mat_frame, text="  No active asteroid", bg=PANEL_BG, fg=TEXT_FG,
+                 font=FONT_PATH, anchor="w").grid(row=0, column=0, sticky="w", padx=8)
+
+        self._n_cracked = 0
+        self._n_collectors = 0
+        self._n_prospectors = 0
+        self._lbl_cracked.config(text="0")
+        self._lbl_collectors.config(text="0")
+        self._lbl_prospectors.config(text="0")
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
+        self.after_idle(self._scroll.refresh_layout)
 
     def _update_cargo_gauge(self) -> None:
         capacity = max(self._cargo_capacity, 0.0)
@@ -308,6 +366,14 @@ class MiningPanel(BasePanel):
         self._cargo_bar.configure(maximum=capacity if capacity > 0 else 1.0)
         self._cargo_var.set(min(used, capacity) if capacity > 0 else 0.0)
         self._lbl_cargo_live.config(text=f"{used:.0f} t / {capacity:.0f} t")
+        ratio = (used / capacity) if capacity > 0 else 0.0
+        if ratio <= 0.70:
+            style = "MiningGreen.Horizontal.TProgressbar"
+        elif ratio <= 0.90:
+            style = "MiningYellow.Horizontal.TProgressbar"
+        else:
+            style = "MiningRed.Horizontal.TProgressbar"
+        self._cargo_bar.configure(style=style)
 
     def _rebuild_cargo(self) -> None:
         for w in self._cargo_frame.winfo_children():
@@ -329,3 +395,34 @@ class MiningPanel(BasePanel):
         hdr.pack(fill="x", pady=(4, 0))
         tk.Label(hdr, text=f"  {title}", bg="#2a2a4a", fg=HEADER_FG,
                  font=FONT_BOLD, anchor="w").pack(fill="x", padx=4, pady=2)
+
+    def _init_progress_styles(self) -> None:
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(
+            "MiningGreen.Horizontal.TProgressbar",
+            troughcolor="#222244",
+            background=GREEN_FG,
+            bordercolor="#222244",
+            lightcolor=GREEN_FG,
+            darkcolor=GREEN_FG,
+        )
+        style.configure(
+            "MiningYellow.Horizontal.TProgressbar",
+            troughcolor="#222244",
+            background=HEADER_FG,
+            bordercolor="#222244",
+            lightcolor=HEADER_FG,
+            darkcolor=HEADER_FG,
+        )
+        style.configure(
+            "MiningRed.Horizontal.TProgressbar",
+            troughcolor="#222244",
+            background=RED_FG,
+            bordercolor="#222244",
+            lightcolor=RED_FG,
+            darkcolor=RED_FG,
+        )
