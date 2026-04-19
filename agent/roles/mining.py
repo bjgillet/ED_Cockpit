@@ -46,6 +46,8 @@ Events handled
                        refined-material counts and remaining limpets.
   Loadout            — ship loadout snapshot; used to capture cargo capacity.
   Docked             — reset transient mining session sections.
+  BuyDrones          — limpets purchased; increases available limpets.
+  SellDrones         — limpets sold; decreases available limpets.
 
 Wire payload shapes
 -------------------
@@ -114,6 +116,8 @@ class MiningRole(BaseRole):
         "Loadout",
         "Cargo",
         "Docked",
+        "BuyDrones",
+        "SellDrones",
     })
 
     def __init__(self) -> None:
@@ -297,6 +301,10 @@ class MiningRole(BaseRole):
             return self._handle_cargo(data)
         if event_name == "Docked":
             return self._handle_docked(data)
+        if event_name == "BuyDrones":
+            return self._handle_buy_drones(data)
+        if event_name == "SellDrones":
+            return self._handle_sell_drones(data)
         return None
 
     def filter_status(self, status: dict) -> dict | None:
@@ -446,6 +454,8 @@ class MiningRole(BaseRole):
             "motherlode": "",
             "remaining": 1.0,
         }
+        self._cargo_tally.clear()
+        self._tracked_refined.clear()
         self._n_cracked = 0
         self._n_collectors = 0
         self._n_prospectors = 0
@@ -454,6 +464,46 @@ class MiningRole(BaseRole):
             "event": "Docked",
             "station": data.get("StationName", ""),
             "system": data.get("StarSystem", ""),
+            "refined_cargo_tally": {},
+        }
+
+    def _handle_buy_drones(self, data: dict) -> dict:
+        try:
+            amount = int(data.get("Count", 0))
+        except (TypeError, ValueError):
+            amount = 0
+        amount = max(amount, 0)
+
+        if amount:
+            self._available_limpets += amount
+            self._last_status["cargo"] = float(self._last_status.get("cargo", 0.0)) + float(amount)
+            self._save_state()
+        return {
+            "event": "BuyDrones",
+            "count": amount,
+            "available_limpets": self._available_limpets,
+            "cargo": float(self._last_status.get("cargo", 0.0)),
+        }
+
+    def _handle_sell_drones(self, data: dict) -> dict:
+        try:
+            amount = int(data.get("Count", 0))
+        except (TypeError, ValueError):
+            amount = 0
+        amount = max(amount, 0)
+
+        if amount:
+            self._available_limpets = max(0, self._available_limpets - amount)
+            self._last_status["cargo"] = max(
+                0.0,
+                float(self._last_status.get("cargo", 0.0)) - float(amount),
+            )
+            self._save_state()
+        return {
+            "event": "SellDrones",
+            "count": amount,
+            "available_limpets": self._available_limpets,
+            "cargo": float(self._last_status.get("cargo", 0.0)),
         }
 
     @staticmethod

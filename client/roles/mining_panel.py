@@ -226,6 +226,10 @@ class MiningPanel(BasePanel):
             self._on_cargo(data)
         elif event == "Docked":
             self._on_docked(data)
+        elif event == "BuyDrones":
+            self._on_buy_drones(data)
+        elif event == "SellDrones":
+            self._on_sell_drones(data)
 
     # ── Internal handlers ──────────────────────────────────────────────────
 
@@ -357,7 +361,25 @@ class MiningPanel(BasePanel):
         self._lbl_collectors.config(text="0")
         self._lbl_prospectors.config(text="0")
         self._lbl_limpets.config(text=str(self._available_limpets))
+        self._cargo.clear()
+        self._rebuild_cargo()
         self.after_idle(self._scroll.refresh_layout)
+
+    def _on_buy_drones(self, data: dict) -> None:
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
+        cargo_val = data.get("cargo")
+        if cargo_val is not None:
+            self._cargo_used = float(cargo_val)
+            self._update_cargo_gauge()
+
+    def _on_sell_drones(self, data: dict) -> None:
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
+        cargo_val = data.get("cargo")
+        if cargo_val is not None:
+            self._cargo_used = float(cargo_val)
+            self._update_cargo_gauge()
 
     def _update_cargo_gauge(self) -> None:
         capacity = max(self._cargo_capacity, 0.0)
