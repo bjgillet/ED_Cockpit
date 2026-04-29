@@ -1,9 +1,17 @@
 """
-ED Cockpit — Client Manager Window
-====================================
-Agent-side Tkinter window that lets the operator manage all registered
-clients: view online status, edit roles, rename, add new clients, and
-revoke access.
+ED Cockpit — Client Manager
+============================
+Provides two classes:
+
+``ClientManagerPanel``
+    A ``tk.Frame`` subclass — the embeddable client-manager panel.
+    Use this when the panel is placed inside another container (e.g. a
+    ``ttk.Notebook`` tab).
+
+``ClientManager``
+    Backward-compatible ``tk.Toplevel`` wrapper around
+    ``ClientManagerPanel``.  Behaves exactly like the original standalone
+    window.
 
 Layout
 ------
@@ -105,34 +113,32 @@ def _fmt_roles(roles: list[str]) -> str:
     return ", ".join(_ROLE_ABBREV.get(r, r) for r in roles)
 
 
-# ── Main window ───────────────────────────────────────────────────────────────
+# ── Embeddable panel ──────────────────────────────────────────────────────────
 
-class ClientManager(tk.Toplevel):
+class ClientManagerPanel(tk.Frame):
     """
-    Agent-side client management window.
+    Embeddable client-manager panel.
+
+    Inherits from ``tk.Frame`` so it can be placed inside any container
+    (e.g. a ``ttk.Notebook`` tab or a ``tk.Toplevel``).
 
     Parameters
     ----------
     parent : tk.Misc
-        Tkinter parent (usually the hidden root Tk()).
+        Tkinter parent widget.
     app : EDApp
         The running agent core — used to read the registry, push role
         updates, add/revoke clients, and query online status.
     """
 
     def __init__(self, parent: tk.Misc, app: "EDApp", **kwargs) -> None:
-        super().__init__(parent, **kwargs)
-        self.title("ED Cockpit — Client Manager")
-        self.configure(bg=BG)
-        self.minsize(680, 320)
-        self.resizable(True, True)
+        super().__init__(parent, bg=BG, **kwargs)
 
         self._app = app
         self._action_queue: queue.Queue = queue.Queue()
         self._action_log: list[str] = []
 
         self._build_ui()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
         self._refresh()
         self.after(POLL_MS, self._auto_refresh)
         self.after(ACTION_MS, self._drain_action_queue)
@@ -205,7 +211,7 @@ class ClientManager(tk.Toplevel):
         self._tree.bind("<Double-1>", lambda e: self._on_edit_roles())
 
     def _build_action_log(self) -> None:
-        """Build the collapsible action log strip at the bottom."""
+        """Build the action log strip at the bottom."""
         tk.Frame(self, bg=SEP_COLOR, height=1).pack(fill="x")
         hdr = tk.Frame(self, bg="#0d0d1e", pady=2)
         hdr.pack(fill="x")
@@ -426,6 +432,40 @@ class ClientManager(tk.Toplevel):
             return
         self._app.revoke_client(cid)
         self._refresh()
+
+
+# ── Backward-compatible Toplevel wrapper ──────────────────────────────────────
+
+class ClientManager(tk.Toplevel):
+    """
+    Standalone client manager window (backward-compatible wrapper).
+
+    Wraps ``ClientManagerPanel`` inside a ``tk.Toplevel``.  Existing
+    call-sites continue to work unchanged.  ``push_action`` is forwarded
+    to the inner panel.
+
+    Parameters
+    ----------
+    parent : tk.Misc
+        Tkinter parent (usually the hidden root Tk()).
+    app : EDApp
+        The running agent core.
+    """
+
+    def __init__(self, parent: tk.Misc, app: "EDApp", **kwargs) -> None:
+        super().__init__(parent, **kwargs)
+        self.title("ED Cockpit — Client Manager")
+        self.configure(bg=BG)
+        self.minsize(680, 320)
+        self.resizable(True, True)
+
+        self._panel = ClientManagerPanel(self, app)
+        self._panel.pack(fill="both", expand=True)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def push_action(self, client_id: str, action: str, key: str) -> None:
+        """Forward to the inner panel (thread-safe)."""
+        self._panel.push_action(client_id, action, key)
 
 
 # ── AddClientDialog ───────────────────────────────────────────────────────────

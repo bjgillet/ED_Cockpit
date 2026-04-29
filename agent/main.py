@@ -1,8 +1,8 @@
 """
 ED Cockpit — Agent Entry Point
 ===============================
-Creates the EDApp core, starts backend services, opens the initial GUI
-window, and runs the tkinter event loop.
+Creates the EDApp core, starts backend services, opens the single GUI
+window (a tabbed cockpit), and runs the tkinter event loop.
 
 Architecture overview
 ---------------------
@@ -23,21 +23,25 @@ Architecture overview
                         │         │  WSServer (port 5759)│             │
                         │         └─────────────────────┘             │
                         └───────────────────┬──────────────────────────┘
-                                            │ queue.Queue  (per window)
-                     ┌──────────────────────┼──────────────────┐
-                     │                      │                   │
-               ┌─────▼──────┐    ┌──────────▼──┐    (future windows…)
-               │ Status      │    │ Client      │
-               │ Monitor     │    │ Manager     │
-               │ (Toplevel)  │    │ (Toplevel)  │
-               └─────────────┘    └─────────────┘
+                                            │ queue.Queue
+                                    ┌───────▼────────┐
+                                    │ EDCockpitWindow │
+                                    │  ┌───────────┐  │
+                                    │  │ Process   │  │
+                                    │  │ Monitor   │  │  (tab 1)
+                                    │  ├───────────┤  │
+                                    │  │ Client    │  │
+                                    │  │ Manager   │  │  (tab 2)
+                                    │  └───────────┘  │
+                                    └────────────────┘
 
         tk.Tk (hidden root — keeps the event loop alive)
 
-The hidden root window is never shown.  All user-facing windows are
-``tk.Toplevel`` instances.  Closing the last window (or pressing Quit)
-calls ``root.quit()`` which terminates ``mainloop()`` and allows the
-``finally`` block below to stop the backend cleanly.
+The hidden root window is never shown.  The single user-facing window is a
+``tk.Toplevel`` (``EDCockpitWindow``) with a ``ttk.Notebook`` that hosts
+the Process Monitor and Client Manager as tabs.  Closing the window (or
+pressing Quit) calls ``root.quit()``, which terminates ``mainloop()`` and
+allows the ``finally`` block below to stop the backend cleanly.
 
 Run
 ---
@@ -57,8 +61,7 @@ for _p in (_ROOT, _AGENT):
         sys.path.insert(0, str(_p))
 
 from agent.core.ed_app import EDApp
-from agent.GUI.ed_status_monitor import EDStatusMonitor
-from agent.GUI.client_manager import ClientManager
+from agent.GUI.cockpit_window import EDCockpitWindow
 
 
 def main() -> None:
@@ -67,18 +70,14 @@ def main() -> None:
     app.start()
 
     # ── 2. Create the hidden tkinter root ─────────────────────────────────
-    #       A hidden Tk() keeps the event loop alive without showing a
-    #       blank root window.  All real windows are Toplevel children.
     root = tk.Tk()
     root.withdraw()
     root.title("ED Cockpit")
 
-    # ── 3. Open the initial windows ───────────────────────────────────────
-    #       quit_on_close=True on the Status Monitor → closing it stops
-    #       the whole application.
-    EDStatusMonitor(root, app, quit_on_close=True)
-    cm = ClientManager(root, app)
-    app.subscribe_actions(cm.push_action)
+    # ── 3. Open the single tabbed cockpit window ───────────────────────────
+    #       quit_on_close=True → closing the window stops the event loop.
+    win = EDCockpitWindow(root, app, quit_on_close=True)
+    app.subscribe_actions(win.push_action)
 
     # ── 4. Run the event loop ─────────────────────────────────────────────
     try:

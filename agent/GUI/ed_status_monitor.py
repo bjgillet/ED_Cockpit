@@ -1,14 +1,25 @@
 """
 ED Cockpit — Status Monitor
 ==========================
-Tkinter/ttk window that displays the live detection status produced by
-the EDApp core (../ed_app.py).
+Provides two classes:
+
+``EDStatusMonitorPanel``
+    A ``tk.Frame`` subclass — the embeddable process-monitor panel.
+    Use this when the panel is placed inside another container (e.g. a
+    ``ttk.Notebook`` tab).  Pass a ``quit_fn`` callable that will be
+    invoked when the user presses the Quit button.
+
+``EDStatusMonitor``
+    Backward-compatible ``tk.Toplevel`` wrapper around
+    ``EDStatusMonitorPanel``.  Behaves exactly like the original standalone
+    window.
 
 Architecture
 ------------
-This window is a pure observer.  It receives an EDApp reference on
+The panel is a pure observer.  It receives an EDApp reference on
 construction, subscribes to its state queue, and unsubscribes cleanly when
-it is closed.  It never creates, owns, or stops any backend service.
+the Quit button is pressed.  It never creates, owns, or stops any backend
+service.
 
 State updates arrive through a thread-safe ``queue.Queue`` supplied by EDApp.
 The queue is drained every POLL_MS milliseconds via ``after()``, so background
@@ -57,7 +68,7 @@ import queue
 import sys
 import tkinter as tk
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 # ── Resolve parent package path ───────────────────────────────────────────────
 _THIS_DIR   = Path(__file__).resolve().parent
@@ -145,50 +156,44 @@ class StatusRow:
         self.path_lbl.config(text=path_text)
 
 
-# ── Main window ───────────────────────────────────────────────────────────────
+# ── Embeddable panel ──────────────────────────────────────────────────────────
 
-class EDStatusMonitor(tk.Toplevel):
+class EDStatusMonitorPanel(tk.Frame):
     """
-    Status monitor window.
+    Embeddable process-monitor panel.
 
-    Observes an EDApp instance by subscribing to its state queue on open
-    and unsubscribing on close.  The backend continues running after this
-    window is closed.
+    Inherits from ``tk.Frame`` so it can be placed inside any container
+    (e.g. a ``ttk.Notebook`` tab or a ``tk.Toplevel``).
 
     Parameters
     ----------
-    tk_root : tk.Tk
-        The application root window (may be hidden).
+    parent : tk.Widget
+        Tkinter parent widget.
     app : EDApp
         The central application core to observe.
-    quit_on_close : bool
-        When True, closing this window also terminates the tkinter event loop
-        (i.e. treats this as the main/last window).  Default: False.
+    quit_fn : callable, optional
+        Called when the user presses the Quit button.  When *None* the
+        panel falls back to destroying its own top-level window and calling
+        ``quit()`` on the root — suitable for standalone use.
     """
 
     def __init__(
         self,
-        tk_root: tk.Tk,
+        parent: tk.Widget,
         app: EDApp,
         *,
-        quit_on_close: bool = False,
+        quit_fn: Optional[Callable[[], None]] = None,
     ) -> None:
-        super().__init__(tk_root)
+        super().__init__(parent, bg=BG)
 
         self._app           = app
         self._queue         = app.subscribe()   # thread-safe state queue
         self._last_state:   Dict  = {}
         self._last_memory:  Dict  = {}
         self._blink_state:  bool  = False
-        self._quit_on_close: bool = quit_on_close
-
-        self.title("ED Cockpit — Process Monitor")
-        self.configure(bg=BG)
-        self.resizable(True, False)
-        self.minsize(580, 0)
+        self._quit_fn                    = quit_fn
 
         self._build_ui()
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(POLL_MS, self._poll)
 
     # ── UI construction ────────────────────────────────────────────────────
@@ -310,6 +315,9 @@ class EDStatusMonitor(tk.Toplevel):
         Scheduled every POLL_MS ms by tkinter's event loop — never called
         from a background thread.
         """
+        if not self.winfo_exists():
+            return
+
         latest: Optional[Dict] = None
         while True:
             try:
@@ -464,17 +472,61 @@ class EDStatusMonitor(tk.Toplevel):
         self.clipboard_append(text)
 
     def _on_quit(self) -> None:
-        """Quit button: close this window and terminate the application."""
+        """Quit button: unsubscribe and terminate the application."""
         self._app.unsubscribe(self._queue)
-        self.destroy()
-        self.master.quit()      # stop the tkinter event loop → main.py exits
+        if self._quit_fn is not None:
+            self._quit_fn()
+        else:
+            # Standalone fallback: close the enclosing top-level and quit.
+            tl = self.winfo_toplevel()
+            tl.destroy()
+            try:
+                tl.master.quit()
+            except Exception:
+                pass
 
-    def _on_close(self) -> None:
-        """Window close button (X): unsubscribe and close the window."""
-        self._app.unsubscribe(self._queue)
-        self.destroy()
-        if self._quit_on_close:
-            self.master.quit()
+
+# ── Backward-compatible Toplevel wrapper ──────────────────────────────────────
+
+class EDStatusMonitor(tk.Toplevel):
+    """
+    Standalone status monitor window (backward-compatible wrapper).
+
+    Wraps ``EDStatusMonitorPanel`` inside a ``tk.Toplevel``.  Existing
+    call-sites that pass ``(tk_root, app, quit_on_close=True)`` continue to
+    work unchanged.
+
+    Parameters
+    ----------
+    tk_root : tk.Tk
+        The application root window (may be hidden).
+    app : EDApp
+        The central application core to observe.
+    quit_on_close : bool
+        When True, closing this window also terminates the tkinter event loop.
+    """
+
+    def __init__(
+        self,
+        tk_root: tk.Tk,
+        app: EDApp,
+        *,
+        quit_on_close: bool = False,
+    ) -> None:
+        super().__init__(tk_root)
+        self.title("ED Cockpit — Process Monitor")
+        self.configure(bg=BG)
+        self.resizable(True, False)
+        self.minsize(580, 0)
+
+        def _quit_fn() -> None:
+            self.destroy()
+            if quit_on_close:
+                self.master.quit()
+
+        self._panel = EDStatusMonitorPanel(self, app, quit_fn=_quit_fn)
+        self._panel.pack(fill="both", expand=True)
+        self.protocol("WM_DELETE_WINDOW", _quit_fn)
 
 
 # ── Standalone entry-point (for development / testing) ───────────────────────
