@@ -238,6 +238,8 @@ class MiningPanel(BasePanel):
             self._on_docked(data)
         elif event == "CargoTransfer":
             self._on_cargo_transfer(data)
+        elif event == "CarrierDepositFuel":
+            self._on_cargo_transfer(data)   # same payload shape
         elif event == "BuyDrones":
             self._on_buy_drones(data)
         elif event == "SellDrones":

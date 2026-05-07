@@ -129,6 +129,7 @@ class MiningRole(BaseRole):
         "Loadout",
         "Cargo",
         "CargoTransfer",
+        "CarrierDepositFuel",
         "Docked",
         "BuyDrones",
         "SellDrones",
@@ -350,6 +351,8 @@ class MiningRole(BaseRole):
             return self._handle_docked(data)
         if event_name == "CargoTransfer":
             return self._handle_cargo_transfer(data)
+        if event_name == "CarrierDepositFuel":
+            return self._handle_carrier_deposit_fuel(data)
         if event_name == "BuyDrones":
             return self._handle_buy_drones(data)
         if event_name == "SellDrones":
@@ -624,6 +627,44 @@ class MiningRole(BaseRole):
                 if count:
                     return count
         return 0
+
+    def _handle_carrier_deposit_fuel(self, data: dict) -> dict | None:
+        """
+        Handle a CarrierDepositFuel journal event.
+
+        Fired when the player deposits Tritium from their ship cargo into
+        the fleet carrier's fuel reserve.  The commodity is always Tritium;
+        the journal field ``Amount`` is how many tonnes were deducted from
+        the ship.
+
+        Example:
+            { "event":"CarrierDepositFuel", "CarrierID":3710914304,
+              "Amount":66, "Total":1000 }
+        """
+        try:
+            amount = int(data.get("Amount", 0))
+        except (TypeError, ValueError):
+            amount = 0
+        if amount <= 0:
+            return None
+
+        # The fuel commodity is always Tritium — find it in the tally using
+        # the same case-insensitive / name-map resolution as CargoTransfer.
+        tracked_name = self._find_tracked_name("tritium")
+        if tracked_name is not None:
+            new_count = max(0, self._cargo_tally.get(tracked_name, 0) - amount)
+            if new_count == 0:
+                self._cargo_tally.pop(tracked_name, None)
+            else:
+                self._cargo_tally[tracked_name] = new_count
+            self._save_state()
+
+        return {
+            "event": "CarrierDepositFuel",
+            "amount": amount,
+            "refined_cargo_tally": dict(self._cargo_tally),
+            "available_limpets": self._available_limpets,
+        }
 
     def _handle_docked(self, data: dict) -> dict:
         self._last_asteroid = {
