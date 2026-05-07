@@ -236,6 +236,8 @@ class MiningPanel(BasePanel):
             self._on_cargo(data)
         elif event == "Docked":
             self._on_docked(data)
+        elif event == "CargoTransfer":
+            self._on_cargo_transfer(data)
         elif event == "BuyDrones":
             self._on_buy_drones(data)
         elif event == "SellDrones":
@@ -391,6 +393,16 @@ class MiningPanel(BasePanel):
             self._lbl_limpets.config(text=str(self._available_limpets))
 
         self.after_idle(self._scroll.refresh_layout)
+
+    def _on_cargo_transfer(self, data: dict) -> None:
+        """Fleet carrier ↔ ship transfer: apply updated tally and limpet count."""
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
+        tally = data.get("refined_cargo_tally")
+        if isinstance(tally, dict):
+            self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
+            self._rebuild_cargo()
+        self._update_cargo_gauge()
 
     def _on_buy_drones(self, data: dict) -> None:
         self._available_limpets = int(data.get("available_limpets", self._available_limpets))

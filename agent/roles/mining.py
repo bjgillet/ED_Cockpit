@@ -47,7 +47,10 @@ Events handled
   Loadout            — ship loadout snapshot; used to capture cargo capacity.
   Docked             — reset asteroid data and session counters; refined-cargo
                        tally and available limpets are preserved and stay in sync
-                       via subsequent Cargo events (sell / transfer / fleet-carrier).
+                       via subsequent Cargo / CargoTransfer events.
+  CargoTransfer      — cargo moved between ship and fleet carrier (or vice-versa).
+                       Updates refined tally and limpets immediately so the panel
+                       stays correct even when a Cargo snapshot does not follow.
   BuyDrones          — limpets purchased; increases available limpets.
   SellDrones         — limpets sold; decreases available limpets.
 
@@ -78,6 +81,13 @@ Wire payload shapes
     {
       "event":      "LaunchDrone",
       "drone_type": "Collection" | "Prospector",
+    }
+
+  CargoTransfer →
+    {
+      "event":               "CargoTransfer",
+      "refined_cargo_tally": {<ore>: <int t>, ...},
+      "available_limpets":   <int>,
     }
 
 Status payload (filter_status) →
@@ -118,6 +128,7 @@ class MiningRole(BaseRole):
         "LaunchDrone",
         "Loadout",
         "Cargo",
+        "CargoTransfer",
         "Docked",
         "BuyDrones",
         "SellDrones",
@@ -327,6 +338,8 @@ class MiningRole(BaseRole):
             return self._handle_cargo(data)
         if event_name == "Docked":
             return self._handle_docked(data)
+        if event_name == "CargoTransfer":
+            return self._handle_cargo_transfer(data)
         if event_name == "BuyDrones":
             return self._handle_buy_drones(data)
         if event_name == "SellDrones":
@@ -425,7 +438,12 @@ class MiningRole(BaseRole):
             "fuel_capacity": data.get("FuelCapacity", {}),
         }
 
-    def _handle_cargo(self, data: dict) -> dict:
+    def _handle_cargo(self, data: dict) -> dict | None:
+        # Ignore non-ship cargo events (e.g. SRV).
+        vessel = str(data.get("Vessel", "Ship"))
+        if vessel.lower() not in ("ship", ""):
+            return None
+
         inventory = data.get("Inventory")
         inv_map: dict[str, int] = {}
         used = float(self._last_status.get("cargo", 0.0))
@@ -451,11 +469,15 @@ class MiningRole(BaseRole):
                 pass
         self._last_status["cargo"] = float(used)
 
-        # Keep refined tally aligned with real cargo inventory:
-        # if cargo is sold/transferred/refuelled, tracked materials decrease too.
+        # Keep refined tally aligned with real cargo inventory.
+        # Use a case-insensitive lookup so that items whose Name_Localised is
+        # absent (falling back to the lowercase internal name, e.g.
+        # "lowtemperaturediamond") still match their tracked display name
+        # ("Low Temperature Diamonds") and don't get incorrectly zeroed out.
         if have_inventory:
+            inv_map_ci = {k.lower(): v for k, v in inv_map.items()}
             for name in list(self._tracked_refined):
-                current = int(inv_map.get(name, 0))
+                current = inv_map_ci.get(name.lower(), 0)
                 if current <= 0:
                     self._cargo_tally.pop(name, None)
                 else:
@@ -472,6 +494,77 @@ class MiningRole(BaseRole):
             "refined_cargo_tally": dict(self._cargo_tally),
             "inventory": inventory if have_inventory else [],
         }
+
+    def _handle_cargo_transfer(self, data: dict) -> dict | None:
+        """
+        Handle a CargoTransfer journal event (fleet carrier ↔ ship transfers).
+
+        The game emits CargoTransfer when the player moves goods between the
+        ship hold and a fleet carrier's hold or tritium reserve.  A Cargo
+        snapshot may or may not follow; we update tally and limpets here so
+        the panel is accurate even when no Cargo event arrives.
+
+        Direction values: "toCarrier" (ship → carrier) | "toShip" (carrier → ship).
+        """
+        transfers = data.get("Transfers", [])
+        if not isinstance(transfers, list) or not transfers:
+            return None
+
+        changed = False
+        for t in transfers:
+            if not isinstance(t, dict):
+                continue
+            raw_name = t.get("Type_Localised") or t.get("Type", "")
+            direction = str(t.get("Direction", ""))
+            try:
+                count = int(t.get("Count", 0))
+            except (TypeError, ValueError):
+                count = 0
+            count = max(count, 0)
+            if not raw_name or count == 0:
+                continue
+
+            name_lower = raw_name.strip().lower()
+            is_limpet = "limpet" in name_lower or name_lower == "drones"
+
+            if is_limpet:
+                if direction == "toCarrier":
+                    self._available_limpets = max(0, self._available_limpets - count)
+                elif direction == "toShip":
+                    self._available_limpets += count
+                changed = True
+            else:
+                # Only touch materials we already track as refined.
+                tracked_name = self._find_tracked_name(raw_name)
+                if tracked_name is not None:
+                    if direction == "toCarrier":
+                        new_count = max(0, self._cargo_tally.get(tracked_name, 0) - count)
+                        if new_count == 0:
+                            self._cargo_tally.pop(tracked_name, None)
+                        else:
+                            self._cargo_tally[tracked_name] = new_count
+                        changed = True
+                    # "toShip" for refined materials is not handled here:
+                    # those are carrier stock of unknown origin, and the
+                    # subsequent Cargo snapshot is the ground truth.
+
+        if changed:
+            self._save_state()
+
+        return {
+            "event": "CargoTransfer",
+            "refined_cargo_tally": dict(self._cargo_tally),
+            "available_limpets": self._available_limpets,
+        }
+
+    def _find_tracked_name(self, name: str) -> str | None:
+        """Return the `_tracked_refined` key whose display name matches *name*
+        case-insensitively, or None if no match."""
+        name_lower = name.strip().lower()
+        for tracked in self._tracked_refined:
+            if tracked.lower() == name_lower:
+                return tracked
+        return None
 
     def _handle_docked(self, data: dict) -> dict:
         self._last_asteroid = {
