@@ -146,6 +146,12 @@ class MiningRole(BaseRole):
         }
         self._cargo_tally: dict[str, int] = {}
         self._tracked_refined: set[str] = set()
+        # Maps internal lowercase name → display name for all refined materials
+        # ever seen.  Populated from MiningRefined (Type/Type_Localised) and
+        # Cargo (Name/Name_Localised) so we can resolve e.g.
+        # "lowtemperaturediamond" → "Low Temperature Diamonds" even when
+        # CargoTransfer or Cargo events omit the localised field.
+        self._name_map: dict[str, str] = {}
         self._n_cracked: int = 0
         self._n_collectors: int = 0
         self._n_prospectors: int = 0
@@ -247,6 +253,9 @@ class MiningRole(BaseRole):
         tracked = saved.get("tracked_refined", [])
         if isinstance(tracked, list):
             self._tracked_refined = {str(name) for name in tracked if str(name)}
+        name_map_raw = saved.get("name_map", {})
+        if isinstance(name_map_raw, dict):
+            self._name_map = {str(k): str(v) for k, v in name_map_raw.items()}
 
         counters = saved.get("counters", {})
         if not isinstance(counters, dict):
@@ -274,6 +283,7 @@ class MiningRole(BaseRole):
                 "asteroid": dict(self._last_asteroid),
                 "cargo_tally": dict(self._cargo_tally),
                 "tracked_refined": sorted(self._tracked_refined),
+                "name_map": dict(self._name_map),
                 "counters": {
                     "cracked": self._n_cracked,
                     "collectors": self._n_collectors,
@@ -396,9 +406,15 @@ class MiningRole(BaseRole):
 
     def _handle_refined(self, data: dict) -> dict:
         ore = data.get("Type_Localised") or data.get("Type", "")
+        # The journal Type field may use a localisation-key wrapper such as
+        # "$lowtemperaturediamond_name;" — normalise it to the plain internal
+        # name ("lowtemperaturediamond") so it matches what CargoTransfer sends.
+        internal = self._strip_journal_key(data.get("Type", "") or "")
         if ore:
             self._tracked_refined.add(ore)
             self._cargo_tally[ore] = self._cargo_tally.get(ore, 0) + 1
+            if internal:
+                self._name_map[internal] = ore
         payload = {
             "event": "MiningRefined",
             "type":  ore,
@@ -470,14 +486,24 @@ class MiningRole(BaseRole):
         self._last_status["cargo"] = float(used)
 
         # Keep refined tally aligned with real cargo inventory.
-        # Use a case-insensitive lookup so that items whose Name_Localised is
-        # absent (falling back to the lowercase internal name, e.g.
-        # "lowtemperaturediamond") still match their tracked display name
-        # ("Low Temperature Diamonds") and don't get incorrectly zeroed out.
+        # Build the name map from any items that carry both Name and
+        # Name_Localised, so future lookups by internal name work correctly
+        # (e.g. "lowtemperaturediamond" → "Low Temperature Diamonds").
         if have_inventory:
+            for item in inventory:
+                if not isinstance(item, dict):
+                    continue
+                display  = (item.get("Name_Localised") or "").strip()
+                internal = self._strip_journal_key(item.get("Name") or "")
+                if display and internal:
+                    self._name_map[internal] = display
+
+            # Reconcile: for each tracked refined material check whether it
+            # is still in the ship's cargo.  Use _resolve_display to handle
+            # entries whose Name_Localised was absent (internal name only).
             inv_map_ci = {k.lower(): v for k, v in inv_map.items()}
             for name in list(self._tracked_refined):
-                current = inv_map_ci.get(name.lower(), 0)
+                current = self._lookup_in_inv(name, inv_map_ci)
                 if current <= 0:
                     self._cargo_tally.pop(name, None)
                 else:
@@ -501,10 +527,12 @@ class MiningRole(BaseRole):
 
         The game emits CargoTransfer when the player moves goods between the
         ship hold and a fleet carrier's hold or tritium reserve.  A Cargo
-        snapshot may or may not follow; we update tally and limpets here so
-        the panel is accurate even when no Cargo event arrives.
+        snapshot with no Inventory (only Count) typically follows; we cannot
+        rely on it for reconciliation so all tally/limpet changes are made
+        here.
 
-        Direction values: "toCarrier" (ship → carrier) | "toShip" (carrier → ship).
+        Note: the journal writes Direction in lowercase ("tocarrier" /
+        "toship"), so we normalise to lowercase before comparing.
         """
         transfers = data.get("Transfers", [])
         if not isinstance(transfers, list) or not transfers:
@@ -515,7 +543,8 @@ class MiningRole(BaseRole):
             if not isinstance(t, dict):
                 continue
             raw_name = t.get("Type_Localised") or t.get("Type", "")
-            direction = str(t.get("Direction", ""))
+            # Direction is lowercase in the actual journal ("tocarrier" / "toship").
+            direction = str(t.get("Direction", "")).lower()
             try:
                 count = int(t.get("Count", 0))
             except (TypeError, ValueError):
@@ -528,23 +557,23 @@ class MiningRole(BaseRole):
             is_limpet = "limpet" in name_lower or name_lower == "drones"
 
             if is_limpet:
-                if direction == "toCarrier":
+                if direction == "tocarrier":
                     self._available_limpets = max(0, self._available_limpets - count)
-                elif direction == "toShip":
+                elif direction == "toship":
                     self._available_limpets += count
                 changed = True
             else:
                 # Only touch materials we already track as refined.
                 tracked_name = self._find_tracked_name(raw_name)
                 if tracked_name is not None:
-                    if direction == "toCarrier":
+                    if direction == "tocarrier":
                         new_count = max(0, self._cargo_tally.get(tracked_name, 0) - count)
                         if new_count == 0:
                             self._cargo_tally.pop(tracked_name, None)
                         else:
                             self._cargo_tally[tracked_name] = new_count
                         changed = True
-                    # "toShip" for refined materials is not handled here:
+                    # "toship" for refined materials is not handled here:
                     # those are carrier stock of unknown origin, and the
                     # subsequent Cargo snapshot is the ground truth.
 
@@ -558,13 +587,43 @@ class MiningRole(BaseRole):
         }
 
     def _find_tracked_name(self, name: str) -> str | None:
-        """Return the `_tracked_refined` key whose display name matches *name*
-        case-insensitively, or None if no match."""
+        """Return the `_tracked_refined` display-name key that matches *name*.
+
+        Tries in order:
+        1. Look up *name* as an internal (non-localised) key in ``_name_map``
+           (e.g. "lowtemperaturediamond" → "Low Temperature Diamonds").
+        2. Direct case-insensitive comparison against tracked display names.
+        Returns None if no match is found.
+        """
         name_lower = name.strip().lower()
+        # Map-based resolution first (handles internal names with no spaces).
+        display = self._name_map.get(name_lower)
+        if display and display in self._tracked_refined:
+            return display
+        # Fallback: direct case-insensitive match on display names.
         for tracked in self._tracked_refined:
             if tracked.lower() == name_lower:
                 return tracked
         return None
+
+    def _lookup_in_inv(self, display_name: str, inv_map_ci: dict[str, int]) -> int:
+        """Look up a tracked display name in a case-insensitive inventory map.
+
+        Tries the display name directly, then falls back to any known internal
+        name so that entries missing ``Name_Localised`` (keyed by their
+        lowercase internal name, e.g. "lowtemperaturediamond") are still found.
+        """
+        # Direct case-insensitive hit.
+        count = inv_map_ci.get(display_name.lower(), 0)
+        if count:
+            return count
+        # Fallback: find the internal name for this display name and try it.
+        for internal, display in self._name_map.items():
+            if display == display_name:
+                count = inv_map_ci.get(internal, 0)
+                if count:
+                    return count
+        return 0
 
     def _handle_docked(self, data: dict) -> dict:
         self._last_asteroid = {
@@ -626,6 +685,25 @@ class MiningRole(BaseRole):
             "available_limpets": self._available_limpets,
             "cargo": float(self._last_status.get("cargo", 0.0)),
         }
+
+    @staticmethod
+    def _strip_journal_key(raw: str) -> str:
+        """Normalise a journal localisation key to its plain commodity name.
+
+        The ED journal sometimes wraps internal names in a localisation key
+        format: ``$lowtemperaturediamond_name;`` or ``$tritium_name;``.
+        This strips the ``$`` prefix and any ``_name;`` / ``_name_plural;``
+        suffix so the result matches what ``CargoTransfer`` sends (e.g.
+        ``"lowtemperaturediamond"``, ``"tritium"``).
+        """
+        s = raw.strip().lower()
+        if s.startswith("$"):
+            s = s[1:]
+        for suffix in ("_name_plural;", "_name;", ";"):
+            if s.endswith(suffix):
+                s = s[: -len(suffix)]
+                break
+        return s
 
     @staticmethod
     def _extract_limpets(inv_map: dict[str, int]) -> int | None:
