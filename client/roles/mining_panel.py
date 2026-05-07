@@ -124,6 +124,15 @@ class MiningPanel(BasePanel):
         self._cargo_frame = cargo
         self._cargo_rows: dict[str, tk.Label] = {}
 
+        # Estimated cargo value row (shown when commodity prices are available)
+        est_row = tk.Frame(cargo_outer, bg=PANEL_BG)
+        est_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        tk.Label(est_row, text="Est. value:", bg=PANEL_BG, fg=ACCENT_FG,
+                 font=FONT_BOLD, anchor="w").pack(side="left", padx=8)
+        self._lbl_est_value = tk.Label(est_row, text="—", bg=PANEL_BG,
+                                       fg=GREEN_FG, font=FONT_BOLD)
+        self._lbl_est_value.pack(side="left")
+
         # ── Stats bar ─────────────────────────────────────────────────────
         self._section("SESSION STATS")
         stats = tk.Frame(self._panel_body, bg=PANEL_BG)
@@ -200,6 +209,7 @@ class MiningPanel(BasePanel):
         self._cargo_used: float = 0.0
         self._cargo_capacity: float = 0.0
         self._available_limpets: int = 0
+        self._prices: dict[str, dict] = {}   # commodity name → {avg_sell, max_sell}
 
         self.after_idle(self._scroll.refresh_layout)
 
@@ -254,6 +264,10 @@ class MiningPanel(BasePanel):
         self._rebuild_cargo()
 
         self._cargo_capacity = float(data.get("cargo_capacity", self._cargo_capacity))
+
+        prices = data.get("commodity_prices")
+        if isinstance(prices, dict) and prices:
+            self._prices = prices
 
         status = data.get("status", {})
         if status:
@@ -346,6 +360,7 @@ class MiningPanel(BasePanel):
         self._update_cargo_gauge()
 
     def _on_docked(self, data: dict) -> None:
+        # Reset asteroid display — no longer relevant once docked.
         self._lbl_content.config(text="—", fg=TEXT_FG)
         self._lbl_motherlode.config(text="—", fg=TEXT_FG)
         self._lbl_remaining.config(text="—")
@@ -354,15 +369,27 @@ class MiningPanel(BasePanel):
         tk.Label(self._mat_frame, text="  No active asteroid", bg=PANEL_BG, fg=TEXT_FG,
                  font=FONT_PATH, anchor="w").grid(row=0, column=0, sticky="w", padx=8)
 
+        # Reset per-session counters.
         self._n_cracked = 0
         self._n_collectors = 0
         self._n_prospectors = 0
         self._lbl_cracked.config(text="0")
         self._lbl_collectors.config(text="0")
         self._lbl_prospectors.config(text="0")
-        self._lbl_limpets.config(text=str(self._available_limpets))
-        self._cargo.clear()
-        self._rebuild_cargo()
+
+        # Refined-cargo tally and available limpets are preserved on docking.
+        # The agent sends back the current tally; apply it so the display
+        # stays consistent with the authoritative agent state.
+        tally = data.get("refined_cargo_tally")
+        if isinstance(tally, dict):
+            self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
+            self._rebuild_cargo()
+
+        limpets = data.get("available_limpets")
+        if limpets is not None:
+            self._available_limpets = int(limpets)
+            self._lbl_limpets.config(text=str(self._available_limpets))
+
         self.after_idle(self._scroll.refresh_layout)
 
     def _on_buy_drones(self, data: dict) -> None:
@@ -400,13 +427,35 @@ class MiningPanel(BasePanel):
         for w in self._cargo_frame.winfo_children():
             w.destroy()
         self._cargo_frame.columnconfigure(1, weight=1)
+        self._cargo_frame.columnconfigure(2, weight=1)
+
+        total_est = 0
+        has_prices = bool(self._prices)
+
         for i, (ore, count) in enumerate(sorted(self._cargo.items())):
             tk.Label(self._cargo_frame, text=f"  {ore}",
                      bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY,
                      anchor="w").grid(row=i, column=0, sticky="w", padx=8)
             tk.Label(self._cargo_frame, text=f"{count} t",
-                     bg=PANEL_BG, fg=ACCENT_FG, font=FONT_BOLD
+                     bg=PANEL_BG, fg=ACCENT_FG, font=FONT_BOLD,
                      ).grid(row=i, column=1, sticky="w")
+            if has_prices:
+                avg_sell = self._prices.get(ore, {}).get("avg_sell", 0)
+                ore_value = count * avg_sell
+                total_est += ore_value
+                price_text = f"~{ore_value:,} Cr" if avg_sell else ""
+                tk.Label(self._cargo_frame, text=price_text,
+                         bg=PANEL_BG, fg=ORANGE_FG, font=FONT_PATH,
+                         ).grid(row=i, column=2, sticky="w", padx=(4, 8))
+
+        if has_prices:
+            self._lbl_est_value.config(
+                text=f"~{total_est:,} Cr" if total_est else "—",
+                fg=GREEN_FG if total_est else TEXT_FG,
+            )
+        else:
+            self._lbl_est_value.config(text="—", fg=TEXT_FG)
+
         self.after_idle(self._scroll.refresh_layout)
 
     # ── Helpers ────────────────────────────────────────────────────────────

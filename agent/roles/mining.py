@@ -45,7 +45,9 @@ Events handled
   Cargo              — full cargo inventory snapshot; used to reconcile
                        refined-material counts and remaining limpets.
   Loadout            — ship loadout snapshot; used to capture cargo capacity.
-  Docked             — reset transient mining session sections.
+  Docked             — reset asteroid data and session counters; refined-cargo
+                       tally and available limpets are preserved and stay in sync
+                       via subsequent Cargo events (sell / transfer / fleet-carrier).
   BuyDrones          — limpets purchased; increases available limpets.
   SellDrones         — limpets sold; decreases available limpets.
 
@@ -91,6 +93,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -139,7 +142,27 @@ class MiningRole(BaseRole):
         self._cargo_capacity: float = 0.0
         self._last_status: dict = {"cargo": 0.0, "cargo_scoop": False}
 
+        # Commodity prices fetched from Inara in a background thread.
+        self._prices: dict[str, dict] = {}
+        self._prices_lock = threading.Lock()
+        threading.Thread(
+            target=self._fetch_prices_bg,
+            name="ED-InaraPrices",
+            daemon=True,
+        ).start()
+
         self._load_state()
+
+    def _fetch_prices_bg(self) -> None:
+        """Daemon thread: load or refresh Inara commodity prices."""
+        try:
+            from agent.tools.inara import fetch_commodity_prices
+            cache_path = self._config_dir / "commodity_prices.json"
+            prices = fetch_commodity_prices(cache_path)
+            with self._prices_lock:
+                self._prices = prices
+        except Exception as exc:
+            log.warning("MiningRole: could not fetch commodity prices: %s", exc)
 
     @staticmethod
     def _resolve_config_dir() -> Path:
@@ -273,6 +296,8 @@ class MiningRole(BaseRole):
         ])
         if not has_state:
             return None
+        with self._prices_lock:
+            prices = dict(self._prices)
         return {
             "asteroid": dict(self._last_asteroid),
             "cargo_tally": dict(self._cargo_tally),
@@ -284,6 +309,7 @@ class MiningRole(BaseRole):
             },
             "status": dict(self._last_status),
             "cargo_capacity": self._cargo_capacity,
+            "commodity_prices": prices,
         }
 
     def filter(self, event_name: str, data: dict) -> dict | None:
@@ -454,8 +480,9 @@ class MiningRole(BaseRole):
             "motherlode": "",
             "remaining": 1.0,
         }
-        self._cargo_tally.clear()
-        self._tracked_refined.clear()
+        # Refined-cargo tally and available limpets are intentionally NOT reset
+        # here — they remain valid until actual cargo changes (sell, transfer to
+        # fleet carrier or tritium reserve) are reflected back via Cargo events.
         self._n_cracked = 0
         self._n_collectors = 0
         self._n_prospectors = 0
@@ -464,7 +491,8 @@ class MiningRole(BaseRole):
             "event": "Docked",
             "station": data.get("StationName", ""),
             "system": data.get("StarSystem", ""),
-            "refined_cargo_tally": {},
+            "refined_cargo_tally": dict(self._cargo_tally),
+            "available_limpets": self._available_limpets,
         }
 
     def _handle_buy_drones(self, data: dict) -> dict:
