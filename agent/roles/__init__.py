@@ -15,12 +15,14 @@ from agent.roles.exobiology import ExobiologyRole
 from agent.roles.mining import MiningRole
 from agent.roles.session import SessionRole
 from agent.roles.navigation import NavigationRole
+from agent.roles.route import RouteRole
 
 _REGISTRY: dict[str, type[BaseRole]] = {
     ExobiologyRole.name: ExobiologyRole,
     MiningRole.name:     MiningRole,
     SessionRole.name:    SessionRole,
     NavigationRole.name: NavigationRole,
+    RouteRole.name:      RouteRole,
 }
 
 

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from agent.GUI.ed_status_monitor import EDStatusMonitorPanel
 from agent.GUI.client_manager import ClientManagerPanel
+from agent.GUI.route_panel import AgentRoutePanel
 
 # ── Theme (must stay in sync with the panel themes) ───────────────────────────
 BG        = "#0d0d1e"
@@ -68,12 +69,13 @@ class EDCockpitWindow(tk.Toplevel):
 
         self.title("ED Cockpit — Agent")
         self.configure(bg=BG)
-        self.minsize(680, 420)
+        self.minsize(680, 480)
         self.resizable(True, True)
 
         self._apply_notebook_style()
         self._build_notebook()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._poll_clipboard()
 
     # ── Style ──────────────────────────────────────────────────────────────
 
@@ -121,6 +123,12 @@ class EDCockpitWindow(tk.Toplevel):
         self._cm_panel = ClientManagerPanel(tab2, self._app)
         self._cm_panel.pack(fill="both", expand=True)
 
+        # ── Tab 3: Route ───────────────────────────────────────────────
+        tab3 = tk.Frame(nb, bg=BG)
+        nb.add(tab3, text="  Route  ")
+        self._route_panel = AgentRoutePanel(tab3, self._app)
+        self._route_panel.pack(fill="both", expand=True)
+
     # ── Public API ─────────────────────────────────────────────────────────
 
     def push_action(self, client_id: str, action: str, key: str) -> None:
@@ -145,3 +153,30 @@ class EDCockpitWindow(tk.Toplevel):
         self.destroy()
         if self._quit_on_close:
             self.master.quit()
+
+    # ── Clipboard queue polling ────────────────────────────────────────────
+
+    def _poll_clipboard(self) -> None:
+        """
+        Drain the clipboard_queue and write each text entry to the local
+        system clipboard via tkinter.
+
+        Called every 200 ms on the tkinter main thread — the only thread
+        allowed to use tkinter clipboard operations.
+
+        Items are placed onto ``app.clipboard_queue`` by
+        ``EDApp._on_action_received`` when a remote client sends
+        ``action="clipboard"``.
+        """
+        try:
+            import queue as _queue
+            while True:
+                text = self._app.clipboard_queue.get_nowait()
+                try:
+                    self.clipboard_clear()
+                    self.clipboard_append(text)
+                except Exception:
+                    pass
+        except _queue.Empty:
+            pass
+        self.after(200, self._poll_clipboard)

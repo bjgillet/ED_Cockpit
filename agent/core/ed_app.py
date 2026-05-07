@@ -47,6 +47,7 @@ import logging
 import queue
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -59,10 +60,9 @@ from agent.network.client_registry import ClientRegistry
 from agent.network.ws_server import WSServer
 from agent.roles import get_role, all_role_names
 from agent.security.tls_setup import ensure_cert, build_server_ssl_context
-from datetime import datetime, timezone
 
 from shared.messages import EventMessage
-from shared.roles_def import ALL_ROLES
+from shared.roles_def import ALL_ROLES, Role
 
 log = logging.getLogger(__name__)
 
@@ -121,9 +121,21 @@ class EDApp:
         self._subscribers: List[queue.Queue] = []
         self._action_observers: List[Callable[[str, str, str], None]] = []
 
+        # Queue for clipboard copy requests from remote clients.
+        # Items are plain strings.  The GUI polls this queue via after() and
+        # performs the actual tkinter clipboard_append on the main thread.
+        self.clipboard_queue: queue.Queue = queue.Queue()
+
         # ── Role handlers (instantiated once) ────────────────────────────
         self._roles = {name: get_role(name) for name in all_role_names()}
         print(f"[ED Agent] Loaded roles: {self._roles}")
+
+        # Give the RouteRole its config dir so it can restore persisted state
+        from agent.roles.route import RouteRole as _RouteRole
+        _route_role = self._roles.get(Role.ROUTE)
+        if isinstance(_route_role, _RouteRole):
+            _route_role.set_config_dir(self._config_dir)
+
         # ── Client registry ───────────────────────────────────────────────
         self._registry = ClientRegistry(self._config_dir / "clients.json")
 
@@ -290,6 +302,84 @@ class EDApp:
                 self._loop,
             )
         return ok
+
+    # ── Route planning (public entry point, thread-safe) ───────────────────
+
+    def plan_route(self, destination: str) -> None:
+        """
+        Trigger fleet-carrier route planning to ``destination``.
+
+        Calls the Spansh API in a background asyncio executor thread so
+        neither the tkinter main thread nor the asyncio event loop blocks.
+
+        Can be called from any thread (tkinter main thread, asyncio thread,
+        or any background thread).
+
+        The result is applied to the RouteRole and broadcast to all
+        connected clients.  GUI panels subscribed via
+        ``RouteRole.subscribe_gui`` are also notified.
+        """
+        if not self._loop:
+            log.warning("plan_route: asyncio loop not running — ignoring.")
+            return
+        # Schedule the async coroutine on the asyncio loop thread-safely.
+        # Works whether this method is called from the tkinter thread or
+        # the asyncio thread.
+        asyncio.run_coroutine_threadsafe(
+            self._plan_route_async(destination), self._loop
+        )
+
+    async def _plan_route_async(self, destination: str) -> None:
+        """Coroutine: call Spansh API in executor, update role, broadcast."""
+        from agent.tools.spansh import fetch_fleet_carrier_route, SpanshRouteError
+        from agent.roles.route import RouteRole as _RouteRole
+
+        route_role: Optional[_RouteRole] = self._roles.get(Role.ROUTE)  # type: ignore[assignment]
+        if route_role is None:
+            log.error("_plan_route_async: RouteRole not registered.")
+            return
+
+        fc_system = route_role.fc_system
+        if not fc_system:
+            log.warning("_plan_route_async: FC system unknown — cannot plan route.")
+            # Notify GUI of the error via the role
+            route_role._notify_gui("RouteError", {"message": "FC position unknown."})
+            return
+
+        # Notify GUI that planning has started
+        route_role._notify_gui("RoutePending", {
+            "source":      fc_system,
+            "destination": destination,
+        })
+
+        loop = asyncio.get_running_loop()
+        try:
+            waypoints = await loop.run_in_executor(
+                None,
+                fetch_fleet_carrier_route,
+                fc_system, destination, 500.0,
+            )
+        except SpanshRouteError as exc:
+            log.error("Route planning failed: %s", exc)
+            route_role._notify_gui("RouteError", {"message": str(exc)})
+            return
+        except Exception as exc:
+            log.error("Unexpected error during route planning: %s", exc)
+            route_role._notify_gui("RouteError", {"message": f"Unexpected error: {exc}"})
+            return
+
+        # Update role state and get broadcast payload
+        snapshot = route_role.set_route(waypoints, destination, fc_system)
+
+        # Broadcast to all connected clients subscribed to the route role
+        if self._ws_server:
+            msg = EventMessage(
+                role      = Role.ROUTE,
+                event     = "RouteLoaded",
+                timestamp = datetime.now(timezone.utc).isoformat(),
+                data      = snapshot,
+            )
+            await self._ws_server.broadcast(Role.ROUTE, msg.to_dict())
 
     # ── Watcher callback (called from watcher background thread) ──────────
 
@@ -461,8 +551,11 @@ class EDApp:
         """
         Called by WSServer when a verified ActionMessage arrives.
 
-        Forwards the request to the ActionHandler which translates the
-        logical key name to a platform-level key injection.
+        Handles three action classes:
+          • ``"clipboard"``     — copy ``key`` to the agent's clipboard.
+          • ``"route_request"`` — plan a FC route to ``key`` (destination).
+          • anything else       — forward to ActionHandler for key injection.
+
         Notifies any registered GUI observer (thread-safe via queue).
         """
         log.info("Action from %s: %s(%s)", client_id, action, key)
@@ -476,6 +569,27 @@ class EDApp:
             except Exception:
                 pass
 
+        # ── Extended action types ──────────────────────────────────────
+        if action == "clipboard":
+            # Put text onto the clipboard queue; the GUI polls it and
+            # executes the actual tkinter clipboard write on the main thread.
+            self.clipboard_queue.put(key)
+            log.debug("Clipboard request from %s: %r", client_id, key[:40])
+            return
+
+        if action == "route_request":
+            # Schedule Spansh API call without blocking the asyncio loop.
+            # _on_action_received is called synchronously from within an
+            # asyncio coroutine, so we can use ensure_future directly.
+            if self._loop:
+                asyncio.ensure_future(
+                    self._plan_route_async(key),
+                    loop=self._loop,
+                )
+            log.info("Route request from %s to %r", client_id, key)
+            return
+
+        # ── Standard key-press action ──────────────────────────────────
         dispatched = self._action_handler.execute(action, key)
         if not dispatched:
             log.warning(

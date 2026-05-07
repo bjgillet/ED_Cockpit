@@ -23,6 +23,7 @@ class Role:
     MINING:             str = "mining"
     SESSION_MONITORING: str = "session_monitoring"
     NAVIGATION:         str = "navigation"
+    ROUTE:              str = "route"
 
 
 # Ordered list of all defined roles — used for validation and UI ordering.
@@ -31,4 +32,5 @@ ALL_ROLES: tuple[str, ...] = (
     Role.MINING,
     Role.SESSION_MONITORING,
     Role.NAVIGATION,
+    Role.ROUTE,
 )

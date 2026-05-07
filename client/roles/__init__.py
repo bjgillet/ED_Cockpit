@@ -18,12 +18,14 @@ from client.roles.exobiology_panel import ExobiologyPanel
 from client.roles.mining_panel import MiningPanel
 from client.roles.session_panel import SessionPanel
 from client.roles.navigation_panel import NavigationPanel
+from client.roles.route_panel import RoutePanel
 
 _REGISTRY: dict[str, type[BasePanel]] = {
     ExobiologyPanel.role_name: ExobiologyPanel,
     MiningPanel.role_name:     MiningPanel,
     SessionPanel.role_name:    SessionPanel,
     NavigationPanel.role_name: NavigationPanel,
+    RoutePanel.role_name:      RoutePanel,
 }
 
 

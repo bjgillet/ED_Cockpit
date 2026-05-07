@@ -128,10 +128,23 @@ class ActionMessage(BaseMessage):
     hmac — HMAC-SHA256 hex digest computed over:
                client_id + ":" + str(seq) + ":" + action + ":" + key
            using the shared token as the key.
+
+    Extended action types
+    ---------------------
+    In addition to "key_press", two further action types are defined:
+
+    action="clipboard", key=<text>
+        Requests the agent to copy ``key`` to its system clipboard.
+        Used by remote clients to trigger clipboard copy on the agent machine
+        (e.g. "Copy next waypoint" from the Route panel).
+
+    action="route_request", key=<destination_system_name>
+        Requests the agent to plan a fleet-carrier route to ``key``
+        via the Spansh API.  Source system is the FC's current position.
     """
     type:   str = "action"
-    action: str = ""    # "key_press"
-    key:    str = ""    # logical key name, e.g. "next_firegroup"
+    action: str = ""    # "key_press" | "clipboard" | "route_request"
+    key:    str = ""    # logical key name or payload depending on action
     seq:    int = 0
     hmac:   str = ""
 
