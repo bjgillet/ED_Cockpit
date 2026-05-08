@@ -8,8 +8,12 @@ for ship jumps) to advance the waypoint index.
 
 Journal events handled
 ----------------------
-  CarrierJump       — FC completed a jump.  Updates FC system and
-                      coordinates; advances current waypoint index.
+  CarrierLocation   — FC arrived at a new system (jump completed).
+                      Updates FC system; coordinates are taken from the
+                      matching waypoint entry (CarrierLocation carries no
+                      StarPos).  Advances current waypoint index.
+  CarrierJump       — Legacy / alternative FC jump event.  Same handling
+                      as CarrierLocation when StarPos is present.
   CarrierStats      — Opens carrier management panel.  Carries
                       ``FuelLevel`` (current tritium in tonnes).
   CarrierDepositFuel — Tritium deposited onto the carrier.  Updates
@@ -73,6 +77,7 @@ class RouteRole(BaseRole):
     name = Role.ROUTE
 
     journal_events = frozenset({
+        "CarrierLocation",
         "CarrierJump",
         "CarrierStats",
         "CarrierDepositFuel",
@@ -275,6 +280,36 @@ class RouteRole(BaseRole):
 
     # ── Internal event handlers ────────────────────────────────────────────
 
+    def _on_carrier_location(self, data: dict) -> dict | None:
+        """
+        FC arrived at a new system after a jump.
+
+        ``CarrierLocation`` carries no ``StarPos``, so coordinates are
+        sourced from the matching waypoint entry in the loaded route.
+        If the system is not in the route (e.g. a manual jump outside the
+        planned route) the FC position is updated without new coordinates.
+        """
+        system = str(data.get("StarSystem", ""))
+        if not system:
+            return None
+
+        with self._lock:
+            self._fc_system = system
+            if self._waypoints:
+                self._current_idx = self._find_fc_waypoint_index()
+                if self._current_idx >= 0:
+                    wp = self._waypoints[self._current_idx]
+                    self._fc_coords = (float(wp["x"]), float(wp["y"]), float(wp["z"]))
+
+        payload = self._build_state_dict()
+        self._save_state()
+        self._notify_gui("RouteProgress", payload)
+        log.info(
+            "RouteRole: CarrierLocation → %r  (waypoint idx=%d)",
+            system, self._current_idx,
+        )
+        return payload
+
     def _on_carrier_jump(self, data: dict) -> dict | None:
         system = str(data.get("StarSystem", ""))
         pos    = data.get("StarPos", [])
@@ -282,7 +317,8 @@ class RouteRole(BaseRole):
 
         with self._lock:
             self._fc_system = system
-            self._fc_coords = coords
+            if coords:
+                self._fc_coords = coords
             if self._waypoints:
                 self._current_idx = self._find_fc_waypoint_index()
 
@@ -468,6 +504,7 @@ def _coords(pos: Any) -> Optional[tuple[float, float, float]]:
 # ── Dispatch table ─────────────────────────────────────────────────────────────
 
 _HANDLERS: dict[str, Callable] = {
+    "CarrierLocation":    RouteRole._on_carrier_location,
     "CarrierJump":        RouteRole._on_carrier_jump,
     "CarrierStats":       RouteRole._on_carrier_stats,
     "CarrierDepositFuel": RouteRole._on_carrier_deposit_fuel,
