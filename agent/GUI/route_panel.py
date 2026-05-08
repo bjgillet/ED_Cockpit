@@ -249,7 +249,7 @@ class AgentRoutePanel(ttk.Frame):
         tree.column("fuel_cost", width=80,  minwidth=60,  stretch=False, anchor="e")
         tree.column("done",      width=55,  minwidth=45,  stretch=False, anchor="center")
 
-        tree.tag_configure("done",    foreground=GREY_FG)
+        tree.tag_configure("done",    foreground=HEADER_FG)
         tree.tag_configure("current", foreground=HEADER_FG)
         tree.tag_configure("future",  foreground=TEXT_FG)
 

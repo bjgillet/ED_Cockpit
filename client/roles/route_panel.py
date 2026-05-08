@@ -18,8 +18,6 @@ Events handled (``event`` field of the ``EventMessage.data`` dict)
 
 Button actions (sent to the agent as ActionMessages)
 -----------------------------------------------------
-  "New Route"          → opens popup on THIS device, then sends
-                         ``action="route_request"`` with the destination.
   "Copy Next Waypoint" → sends ``action="clipboard"`` with the system name.
   "Call Back FC"       → sends ``action="clipboard"`` with the ship's
                          current system name.
@@ -114,8 +112,6 @@ class RoutePanel(BasePanel):
             relief="flat", bd=0, font=FONT_BODY,
             cursor="hand2", padx=10, pady=4,
         )
-        tk.Button(btn_fc, text="New Route",
-                  command=self._on_new_route, **_BTN).pack(side="left", padx=4, pady=4)
         tk.Button(btn_fc, text="Copy Next Waypoint",
                   command=self._on_copy_next, **_BTN).pack(side="left", padx=4, pady=4)
 
@@ -179,7 +175,7 @@ class RoutePanel(BasePanel):
         tree.column("fuel_cost", width=75,  minwidth=55,  stretch=False, anchor="e")
         tree.column("done",      width=50,  minwidth=40,  stretch=False, anchor="center")
 
-        tree.tag_configure("done",    foreground=GREY_FG)
+        tree.tag_configure("done",    foreground=HEADER_FG)
         tree.tag_configure("current", foreground=HEADER_FG)
         tree.tag_configure("future",  foreground=TEXT_FG)
 
@@ -263,12 +259,6 @@ class RoutePanel(BasePanel):
 
     # ── Button handlers ────────────────────────────────────────────────────
 
-    def _on_new_route(self) -> None:
-        fc_system = self._state.get("fc_system", "")
-        tritium   = self._state.get("tritium_available", 0.0)
-        last_dest = self._state.get("destination", "")
-        _ClientNewRouteDialog(self, self.send_action, fc_system, tritium, last_dest)
-
     def _on_copy_next(self) -> None:
         system = self._next_waypoint_system()
         if not system:
@@ -318,100 +308,3 @@ class RoutePanel(BasePanel):
         return val
 
 
-# ── New Route dialog (client-side) ─────────────────────────────────────────────
-
-class _ClientNewRouteDialog(tk.Toplevel):
-    """
-    Modal dialog for entering a new route destination on the client.
-
-    On confirmation sends ``action="route_request"`` to the agent via the
-    provided ``send_action`` callback (inherited from ``BasePanel``).
-    """
-
-    def __init__(
-        self,
-        parent:       tk.Misc,
-        send_action:  callable,
-        fc_system:    str,
-        tritium:      float,
-        last_dest:    str,
-    ) -> None:
-        super().__init__(parent)
-        self._send_action = send_action
-
-        self.title("Plan Fleet Carrier Route")
-        self.configure(bg=BG)
-        self.resizable(False, False)
-        self.grab_set()
-        self.transient(parent)
-
-        self._build(fc_system, tritium, last_dest)
-
-        self.update_idletasks()
-        pw = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        self.geometry(f"+{pw + 40}+{py + 40}")
-
-    def _build(self, fc_system: str, tritium: float, last_dest: str) -> None:
-        hdr = tk.Frame(self, bg=HEADER_BG, pady=4)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="  Plan Fleet Carrier Route",
-                 bg=HEADER_BG, fg=HEADER_FG, font=FONT_BOLD).pack(side="left", padx=6)
-
-        body = tk.Frame(self, bg=PANEL_BG, padx=16, pady=12)
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(1, weight=1)
-
-        def row_label(r: int, text: str) -> None:
-            tk.Label(body, text=text, bg=PANEL_BG, fg=ACCENT,
-                     font=FONT_BOLD, anchor="w").grid(
-                row=r, column=0, sticky="w", pady=3, padx=(0, 8))
-
-        row_label(0, "FC Location :")
-        tk.Label(body, text=fc_system or "Unknown",
-                 bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY, anchor="w",
-                 width=32).grid(row=0, column=1, sticky="ew")
-
-        row_label(1, "Tritium avl. :")
-        tk.Label(body, text=f"{tritium:.0f} t" if tritium else "—",
-                 bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY, anchor="w",
-                 ).grid(row=1, column=1, sticky="ew")
-
-        row_label(2, "Destination :")
-        self._dest_var = tk.StringVar(value=last_dest)
-        entry = tk.Entry(body, textvariable=self._dest_var,
-                         bg="#1a1a3a", fg=TEXT_FG, insertbackground=TEXT_FG,
-                         font=FONT_BODY, relief="flat", width=34)
-        entry.grid(row=2, column=1, sticky="ew", pady=(4, 8))
-        entry.focus_set()
-        entry.icursor("end")
-
-        self._lbl_status = tk.Label(body, text="", bg=PANEL_BG, fg=GREY_FG,
-                                    font=FONT_TINY)
-        self._lbl_status.grid(row=3, column=0, columnspan=2, sticky="w")
-
-        btn_row = tk.Frame(self, bg=BG, pady=8)
-        btn_row.pack(fill="x")
-        _BTN = dict(bg=BTN_BG, fg=GREEN_FG, activebackground=BTN_ACT,
-                    activeforeground=TEXT_FG, relief="flat", bd=0,
-                    font=FONT_BODY, cursor="hand2", padx=14, pady=5)
-
-        tk.Button(btn_row, text="Plan Route",
-                  command=self._on_plan, **_BTN).pack(side="left", padx=12)
-        tk.Button(btn_row, text="Cancel",
-                  command=self.destroy,
-                  bg=BTN_BG, fg=GREY_FG, activebackground=BTN_ACT,
-                  activeforeground=TEXT_FG, relief="flat", bd=0,
-                  font=FONT_BODY, cursor="hand2", padx=14, pady=5,
-                  ).pack(side="left", padx=4)
-
-        entry.bind("<Return>", lambda _e: self._on_plan())
-        entry.bind("<Escape>", lambda _e: self.destroy())
-
-    def _on_plan(self) -> None:
-        destination = self._dest_var.get().strip()
-        if not destination:
-            self._lbl_status.config(text="Please enter a destination system.", fg="red")
-            return
-        self._send_action("route_request", destination)
-        self.destroy()

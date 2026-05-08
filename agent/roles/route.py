@@ -302,6 +302,7 @@ class RouteRole(BaseRole):
                     self._fc_coords = (float(wp["x"]), float(wp["y"]), float(wp["z"]))
 
         payload = self._build_state_dict()
+        payload["event"] = "RouteProgress"
         self._save_state()
         self._notify_gui("RouteProgress", payload)
         log.info(
@@ -323,6 +324,7 @@ class RouteRole(BaseRole):
                 self._current_idx = self._find_fc_waypoint_index()
 
         payload = self._build_state_dict()
+        payload["event"] = "RouteProgress"
         self._save_state()
         self._notify_gui("RouteProgress", payload)
         return payload
@@ -335,6 +337,7 @@ class RouteRole(BaseRole):
             self._tritium = float(fuel)
 
         payload = self._build_state_dict()
+        payload["event"] = "TritiumUpdate"
         self._save_state()
         self._notify_gui("TritiumUpdate", payload)
         return payload
@@ -347,6 +350,7 @@ class RouteRole(BaseRole):
             self._tritium = float(total)
 
         payload = self._build_state_dict()
+        payload["event"] = "TritiumUpdate"
         self._save_state()
         self._notify_gui("TritiumUpdate", payload)
         return payload
@@ -361,6 +365,7 @@ class RouteRole(BaseRole):
             self._ship_coords = coords
 
         payload = self._build_state_dict()
+        payload["event"] = "ShipMoved"
         self._notify_gui("ShipMoved", payload)
         return payload
 
@@ -381,6 +386,7 @@ class RouteRole(BaseRole):
                     self._current_idx = self._find_fc_waypoint_index()
 
         payload = self._build_state_dict()
+        payload["event"] = "ShipMoved"
         self._notify_gui("ShipMoved", payload)
         return payload
 
@@ -399,6 +405,7 @@ class RouteRole(BaseRole):
                 self._current_idx = self._find_fc_waypoint_index()
 
         payload = self._build_state_dict()
+        payload["event"] = "RouteProgress"
         self._save_state()
         self._notify_gui("RouteProgress", payload)
         return payload
