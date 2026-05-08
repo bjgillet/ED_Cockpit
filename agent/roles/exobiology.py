@@ -32,9 +32,9 @@ State persistence
   ``<config_dir>/exobiology_state.json`` that survives agent restarts.
 
   Data is accumulated across **all** visited systems and bodies during an
-  expedition.  Everything is cleared only when a ``SellOrganicData`` event
-  is received (player sold data at Vista Genomics): ``systems``,
-  ``fss_counts`` and ``saa_genera`` are all wiped.
+  expedition.  Everything is cleared when a ``SellOrganicData`` event is
+  received (player sold data at Vista Genomics): ``systems``, ``fss_counts``,
+  ``saa_genera``, ``first_footfalls`` and ``ff_context`` are all wiped.
 
   State file format::
 
@@ -56,9 +56,6 @@ State persistence
       },
       "last_updated": "<ISO-8601 UTC>"
     }
-
-  ``first_footfalls`` is **never** cleared by ``SellOrganicData``; it is a
-  permanent record of bodies where the player achieved first footfall.
 
   Backward compatibility: old single-system files (with top-level ``system``,
   ``body``, ``scans`` keys) are automatically migrated on first load.
@@ -527,11 +524,12 @@ class ExobiologyRole(BaseRole):
                 "value":   int(entry.get("Value", 0)),
                 "bonus":   int(entry.get("Bonus", 0)),
             })
-        # Data sold — clear all accumulated expedition data across all systems.
-        # first_footfalls is intentionally preserved (permanent record).
+        # Data sold — wipe all accumulated expedition data completely.
         self._systems.clear()
         self._fss_counts.clear()
         self._saa_genera.clear()
+        self._first_footfalls.clear()
+        self._ff_context.clear()
         self._save_state()
         log.info("ExobiologyRole: all expedition data cleared after SellOrganicData")
         return {

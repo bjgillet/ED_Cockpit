@@ -429,6 +429,7 @@ class ExobiologyPanel(BasePanel):
         # Data submitted to Vista Genomics — wipe all accumulated expedition
         # data and reset the running totals so the table shows empty.
         self._systems.clear()
+        self._first_footfalls.clear()
         self._total_remaining = 0
         self._total_scanned   = 0
         self._table.clear_collapse_state()
