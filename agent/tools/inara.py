@@ -1,52 +1,31 @@
 """
-ED Cockpit — Inara Commodity Price Fetcher
-==========================================
-Fetches average and maximum sell prices for Elite Dangerous commodities
-from the Inara public commodity list page, and caches the result in a
-local JSON file so Inara is contacted at most once per month.
+ED Cockpit — Commodity Price Fetcher
+======================================
+Fetches average and maximum sell prices for Elite Dangerous commodities.
 
-No external dependencies — uses only the Python standard library
-(urllib + re + json), consistent with the rest of the agent tools.
+Primary source: Ardent Insight API (https://api.ardent-insight.com)
+  Open JSON REST API, no authentication, powered by EDDN community data.
+  Docs / source: https://github.com/iaincollins/ardent-api
 
-Data source
------------
-  https://inara.cz/elite/commodities-list/
-
-  Inara aggregates real-time market data from EDDN (contributed by players
-  running EDMC, EDDiscovery, EDDI, etc.).  The commodity list shows:
-    • Avg sell price   — community average sell price across all markets
-    • Max sell price   — highest known sell price currently on record
-
-Cache strategy
+Fallback chain
 --------------
-  Three layers (tried in order):
-
-  1. Memory cache — populated from layers below on the first call.
-                   Avoids repeated disk/network I/O within one process run.
-
-  2. File cache   — JSON file at a configurable path (typically
-                   ~/.config/ed-cockpit/commodity_prices.json or
-                   %APPDATA%\\ed-cockpit\\commodity_prices.json on Windows).
-                   Written on every successful Inara fetch.
-                   Considered fresh for CACHE_MAX_DAYS days.
-
-  3. Live fetch   — HTTP request to Inara.  Result is written to the file
-                   cache and stored in memory.
-
-  4. Bundled data — If layers 2 and 3 both fail (e.g. Inara is down or the
-                   machine is behind a firewall), the static price list
-                   bundled with the agent (agent/data/mining_commodity_prices.json)
-                   is used as a last resort.  Prices may be slightly outdated
-                   but are always better than nothing.  Update the bundled
-                   file by running:  python check_inara.py
+  1. Memory cache     — avoids repeated I/O within one process run.
+  2. File cache       — local JSON written after every successful fetch.
+                        Considered fresh for CACHE_MAX_DAYS days.
+  3. Ardent API fetch — live JSON from api.ardent-insight.com.
+  4. Stale file cache — used if the live fetch fails.
+  5. Bundled data     — static prices shipped with the agent
+                        (agent/data/mining_commodity_prices.json).
+                        Covers all common mining commodities.
+                        Refresh with:  python check_inara.py --local
 
 Cache file format
 -----------------
   {
     "fetched_at": "<ISO 8601 UTC timestamp>",
     "prices": {
-      "Painite":   {"avg_sell": 57672,  "max_sell": 391116},
-      "Void Opal": {"avg_sell": 150532, "max_sell": 552666},
+      "Painite":                  {"avg_sell": 57524,  "max_sell": 402344},
+      "Low Temperature Diamonds": {"avg_sell": 129388, "max_sell": 647653},
       ...
     }
   }
@@ -54,11 +33,11 @@ Cache file format
 Returned structure (from fetch_commodity_prices)
 -------------------------------------------------
   {
-    "Painite":      {"avg_sell": 57672,  "max_sell": 391116},
-    "Void Opal":    {"avg_sell": 150532, "max_sell": 552666},
-    "Tritium":      {"avg_sell": 53422,  "max_sell": 61894},
+    "Painite":                  {"avg_sell": 57524,  "max_sell": 402344},
+    "Low Temperature Diamonds": {"avg_sell": 129388, "max_sell": 647653},
     ...
   }
+  Keys are the localised display names used in MiningRefined journal events.
 """
 from __future__ import annotations
 
@@ -75,41 +54,58 @@ log = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-_INARA_URL      = "https://inara.cz/elite/commodities-list/"
-_HTTP_TIMEOUT   = 15.0   # seconds per request
-CACHE_MAX_DAYS  = 30     # refresh file cache if older than this many days
+_ARDENT_URL     = "https://api.ardent-insight.com/v2/commodities"
+_HTTP_TIMEOUT   = 20.0  # seconds per request
+CACHE_MAX_DAYS  = 30    # refresh file cache if older than this many days
 
-# Bundled static price list shipped with the agent — used as last resort when
-# Inara is unreachable (firewall, bot detection, site down, etc.).
+# Bundled static price list shipped with the agent — last resort fallback.
 _BUNDLED_PRICES_PATH = Path(__file__).parent.parent / "data" / "mining_commodity_prices.json"
 
-# Browser-like headers to avoid bot-detection (Cloudflare, etc.).
-# Inara's commodity list is a public page but some IPs / plain urllib
-# User-Agents are challenged.  Using a realistic browser signature avoids
-# most soft blocks without requiring any credentials.
 _HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer":         "https://inara.cz/elite/",
-    "Connection":      "keep-alive",
-    "DNT":             "1",
+    "User-Agent": "ED-Cockpit/1.0 (Commodity Price Cache)",
+    "Accept":     "application/json",
 }
 
-# Match one commodity table row: capture the name from the anchor, then
-# everything up to the closing </tr> for price extraction.
-_ROW_RE = re.compile(
-    r'href="/elite/commodity/\d+/"[^>]*>\s*([^<]+?)\s*</a>(.*?)</tr>',
-    re.DOTALL | re.IGNORECASE,
-)
-
-# Match price values like "57,672 Cr"
-_PRICE_RE = re.compile(r'([\d,]+)\s*Cr', re.IGNORECASE)
+# ── Internal-name → display-name mapping ──────────────────────────────────────
+# The Ardent API uses lowercase journal internal names (e.g. "lowtemperaturediamond").
+# The panel and cargo tally use localised display names ("Low Temperature Diamonds").
+# This mapping covers all common mining commodities and the most traded metals.
+_INTERNAL_TO_DISPLAY: dict[str, str] = {
+    "alexandrite":                   "Alexandrite",
+    "benitoite":                     "Benitoite",
+    "bromellite":                    "Bromellite",
+    "coltan":                        "Coltan",
+    "gold":                          "Gold",
+    "grandidierite":                 "Grandidierite",
+    "jadeite":                       "Jadeite",
+    "lowtemperaturediamond":         "Low Temperature Diamonds",
+    "methanolmonohydratecrystals":   "Methanol Monohydrate Crystals",
+    "monazite":                      "Monazite",
+    "musgravite":                    "Musgravite",
+    "osmium":                        "Osmium",
+    "opal":                          "Void Opal",
+    "painite":                       "Painite",
+    "palladium":                     "Palladium",
+    "platinum":                      "Platinum",
+    "praseodymium":                  "Praseodymium",
+    "rhodplumsite":                  "Rhodplumsite",
+    "samarium":                      "Samarium",
+    "serendibite":                   "Serendibite",
+    "taaffeite":                     "Taaffeite",
+    "tritium":                       "Tritium",
+    # common metals mined in laser / core mining
+    "beryllium":                     "Beryllium",
+    "gallium":                       "Gallium",
+    "indium":                        "Indium",
+    "lithium":                       "Lithium",
+    "rutile":                        "Rutile",
+    "uraninite":                     "Uraninite",
+    "bauxite":                       "Bauxite",
+    "cobalt":                        "Cobalt",
+    "copper":                        "Copper",
+    "gallite":                       "Gallite",
+    "indite":                        "Indite",
+}
 
 # ── In-memory layer (process-lifetime cache) ───────────────────────────────────
 
@@ -124,29 +120,25 @@ def fetch_commodity_prices(
     force_refresh: bool = False,
 ) -> dict[str, dict]:
     """
-    Return a dict mapping commodity name → {avg_sell, max_sell}.
+    Return a dict mapping commodity display name → {avg_sell, max_sell}.
 
     Lookup order
     ------------
-    1. In-memory cache    — hit if already populated this process run.
-    2. File cache         — read ``cache_path`` if fresh (≤ CACHE_MAX_DAYS).
-    3. Inara HTTP fetch   — done only when the file is absent / stale.
-       Result is written back to ``cache_path`` and stored in memory.
+    1. In-memory cache  — hit if already populated this process run.
+    2. File cache       — read ``cache_path`` if fresh (≤ CACHE_MAX_DAYS).
+    3. Ardent API fetch — live JSON from api.ardent-insight.com.
+    4. Stale file cache — used if the live fetch fails.
+    5. Bundled data     — static prices shipped with the agent.
 
-    Pass ``force_refresh=True`` to skip both caches and always fetch.
-
-    Never raises — returns an empty dict on any error so the caller
+    Never raises — returns an empty dict on total failure so the caller
     can degrade gracefully.
-
-    Blocking — call inside a daemon thread or asyncio executor.
 
     Parameters
     ----------
     cache_path : Path, optional
-        Path to the JSON cache file.  When *None* only the in-memory
-        layer is used (no disk I/O).
+        Path to the JSON cache file.
     force_refresh : bool
-        Bypass both caches and fetch unconditionally.
+        Bypass all caches and always fetch fresh data.
     """
     global _MEM_CACHE
 
@@ -159,37 +151,35 @@ def fetch_commodity_prices(
         if cached is not None:
             _MEM_CACHE = cached
             log.info(
-                "Inara: loaded %d commodity prices from file cache (%s)",
+                "Commodity prices: loaded %d entries from file cache (%s)",
                 len(cached), cache_path,
             )
             return _MEM_CACHE
 
-    # ── Live fetch ──────────────────────────────────────────────────────────
+    # ── Live fetch (Ardent API) ─────────────────────────────────────────────
     try:
-        html   = _fetch_html(_INARA_URL)
-        prices = _parse_commodity_table(html)
+        prices = _fetch_ardent()
     except Exception as exc:
-        log.warning("Inara: commodity price fetch failed: %s", exc)
+        log.warning("Commodity prices: Ardent API fetch failed: %s", exc)
         prices = {}
 
     if prices:
-        log.info("Inara: fetched %d commodity prices from Inara", len(prices))
+        log.info(
+            "Commodity prices: fetched %d entries from Ardent API", len(prices)
+        )
         if cache_path is not None:
             _save_file_cache(cache_path, prices)
         _MEM_CACHE = prices
         return _MEM_CACHE
 
-    log.warning(
-        "Inara: live fetch returned 0 commodities "
-        "(bot detection / page structure change / network error)"
-    )
+    log.warning("Commodity prices: live fetch returned 0 entries")
 
     # ── Stale file cache ────────────────────────────────────────────────────
     if cache_path is not None:
         stale = _load_file_cache(cache_path, ignore_age=True)
         if stale:
             log.warning(
-                "Inara: using stale file cache as fallback (%d commodities)", len(stale)
+                "Commodity prices: using stale file cache (%d entries)", len(stale)
             )
             _MEM_CACHE = stale
             return _MEM_CACHE
@@ -198,8 +188,8 @@ def fetch_commodity_prices(
     bundled = _load_bundled_prices()
     if bundled:
         log.warning(
-            "Inara: using bundled static prices as last resort (%d commodities). "
-            "Run 'python check_inara.py' from the agent machine to refresh.",
+            "Commodity prices: using bundled static prices (%d entries). "
+            "Run 'python check_inara.py' to attempt a live refresh.",
             len(bundled),
         )
         _MEM_CACHE = bundled
@@ -209,9 +199,74 @@ def fetch_commodity_prices(
 
 
 def invalidate_memory_cache() -> None:
-    """Clear the in-memory cache.  Next call re-reads the file (or fetches)."""
+    """Clear the in-memory cache. Next call re-reads the file or fetches."""
     global _MEM_CACHE
     _MEM_CACHE = None
+
+
+# ── Ardent API ─────────────────────────────────────────────────────────────────
+
+def _fetch_ardent() -> dict[str, dict]:
+    """
+    Fetch all commodities from the Ardent Insight API and return a
+    display-name-keyed price dict.
+
+    The API returns records for every known commodity; we filter to those
+    that appear in _INTERNAL_TO_DISPLAY and store both the display name
+    key (for the panel) and the internal name key (for journal lookups).
+    """
+    req = urllib.request.Request(_ARDENT_URL, headers=_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+            raw = resp.read()
+            encoding = resp.headers.get("Content-Encoding", "")
+            if encoding.lower() == "gzip":
+                import gzip
+                raw = gzip.decompress(raw)
+            data = json.loads(raw.decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            f"HTTP {exc.code} fetching Ardent commodity list: {exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"URL error fetching Ardent commodity list: {exc.reason}"
+        ) from exc
+
+    if not isinstance(data, list):
+        raise RuntimeError(
+            f"Unexpected Ardent response type: {type(data).__name__}"
+        )
+
+    prices: dict[str, dict] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        internal = str(item.get("commodityName", "")).strip().lower()
+        avg_sell  = item.get("avgSellPrice")
+        max_sell  = item.get("maxSellPrice")
+
+        if avg_sell is None or max_sell is None:
+            continue
+
+        try:
+            entry = {
+                "avg_sell": int(avg_sell),
+                "max_sell": int(max_sell),
+            }
+        except (TypeError, ValueError):
+            continue
+
+        # Store under internal name so the mining role's _name_map lookups work.
+        prices[internal] = entry
+
+        # Also store under the localised display name so the client panel can
+        # look up by the string it receives from MiningRefined events.
+        display = _INTERNAL_TO_DISPLAY.get(internal)
+        if display:
+            prices[display] = entry
+
+    return prices
 
 
 # ── File cache helpers ─────────────────────────────────────────────────────────
@@ -221,22 +276,15 @@ def _load_file_cache(
     *,
     ignore_age: bool = False,
 ) -> Optional[dict[str, dict]]:
-    """
-    Load prices from the JSON cache file.
-
-    Returns the price dict if the file exists and (unless *ignore_age*)
-    is not older than CACHE_MAX_DAYS.  Returns None otherwise.
-    """
     try:
         raw  = json.loads(path.read_text(encoding="utf-8"))
         ts   = datetime.fromisoformat(raw["fetched_at"])
-        # Make offset-naive timestamps comparable.
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         age  = datetime.now(timezone.utc) - ts
         if not ignore_age and age > timedelta(days=CACHE_MAX_DAYS):
             log.info(
-                "Inara: cache file is %d days old (> %d) — will refresh",
+                "Commodity prices: cache is %d days old (> %d) — will refresh",
                 age.days, CACHE_MAX_DAYS,
             )
             return None
@@ -245,31 +293,14 @@ def _load_file_cache(
             return None
         return {str(k): dict(v) for k, v in prices.items()}
     except FileNotFoundError:
-        log.debug("Inara: no cache file at %s — will fetch", path)
+        log.debug("Commodity prices: no cache file at %s", path)
         return None
     except Exception as exc:
-        log.warning("Inara: could not read cache file %s: %s", path, exc)
-        return None
-
-
-def _load_bundled_prices() -> Optional[dict[str, dict]]:
-    """Load the static price list bundled with the agent (agent/data/mining_commodity_prices.json).
-
-    Returns the price dict or None if the file cannot be read.
-    """
-    try:
-        raw = json.loads(_BUNDLED_PRICES_PATH.read_text(encoding="utf-8"))
-        prices = raw.get("prices", {})
-        if not isinstance(prices, dict) or not prices:
-            return None
-        return {str(k): dict(v) for k, v in prices.items()}
-    except Exception as exc:
-        log.debug("Inara: could not load bundled prices: %s", exc)
+        log.warning("Commodity prices: could not read cache %s: %s", path, exc)
         return None
 
 
 def _save_file_cache(path: Path, prices: dict[str, dict]) -> None:
-    """Write prices and a UTC timestamp to the JSON cache file."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
@@ -280,16 +311,50 @@ def _save_file_cache(path: Path, prices: dict[str, dict]) -> None:
             json.dumps(data, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        log.info("Inara: price cache written to %s", path)
+        log.info("Commodity prices: cache written to %s", path)
     except Exception as exc:
-        log.warning("Inara: could not write cache file %s: %s", path, exc)
+        log.warning("Commodity prices: could not write cache %s: %s", path, exc)
 
 
-# ── HTTP + HTML parsing ────────────────────────────────────────────────────────
+def _load_bundled_prices() -> Optional[dict[str, dict]]:
+    """Load the static price list bundled with the agent."""
+    try:
+        raw = json.loads(_BUNDLED_PRICES_PATH.read_text(encoding="utf-8"))
+        prices = raw.get("prices", {})
+        if not isinstance(prices, dict) or not prices:
+            return None
+        return {str(k): dict(v) for k, v in prices.items()}
+    except Exception as exc:
+        log.debug("Commodity prices: could not load bundled prices: %s", exc)
+        return None
+
+
+# ── Legacy Inara scraping (kept as reference, not called by default) ───────────
+
+_INARA_URL = "https://inara.cz/elite/commodities-list/"
+
+_INARA_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
+    "Referer":         "https://inara.cz/elite/",
+}
+
+_ROW_RE   = re.compile(
+    r'href="/elite/commodity/\d+/"[^>]*>\s*([^<]+?)\s*</a>(.*?)</tr>',
+    re.DOTALL | re.IGNORECASE,
+)
+_PRICE_RE = re.compile(r'([\d,]+)\s*Cr', re.IGNORECASE)
+
 
 def _fetch_html(url: str) -> str:
-    """Download the commodity list page and return it decoded."""
-    req = urllib.request.Request(url, headers=_HEADERS)
+    """Download a page and return it decoded (used by check_inara.py --local)."""
+    req = urllib.request.Request(url, headers=_INARA_HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
             raw      = resp.read()
@@ -317,30 +382,22 @@ def _charset_from_headers(headers) -> str:
 
 def _parse_commodity_table(html: str) -> dict[str, dict]:
     """
-    Parse the Inara commodity list HTML into a price map.
+    Parse the Inara commodity list HTML (used by check_inara.py --local).
 
-    Table columns (in order):
-      0 avg_sell  1 avg_buy  2 avg_profit  3 max_sell  4 min_buy  5 max_profit
-
-    We store avg_sell (index 0) and max_sell (index 3).
-    Rows with fewer than 4 price values are skipped (headers / empty rows).
+    Table columns: 0=avg_sell 1=avg_buy 2=avg_profit 3=max_sell 4=min_buy 5=max_profit
     """
     results: dict[str, dict] = {}
     for m in _ROW_RE.finditer(html):
         name     = m.group(1).strip()
         row_tail = m.group(2)
-
-        prices = [
+        prices   = [
             int(raw.replace(",", ""))
             for raw in _PRICE_RE.findall(row_tail)
         ]
-
         if not name or len(prices) < 4:
             continue
-
         results[name] = {
             "avg_sell": prices[0],
             "max_sell": prices[3],
         }
-
     return results

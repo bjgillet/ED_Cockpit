@@ -62,10 +62,12 @@ sys.path.insert(0, str(project_root))
 try:
     from agent.tools.inara import (
         fetch_commodity_prices,
+        _fetch_ardent,
         _fetch_html,
         _parse_commodity_table,
         _save_file_cache,
         _INARA_URL,
+        _ARDENT_URL,
     )
 except ImportError as e:
     print(f"\nImport error: {e}")
@@ -73,7 +75,26 @@ except ImportError as e:
     print("  python check_inara.py")
     sys.exit(1)
 
-# ── Choose source ──────────────────────────────────────────────────────────
+# ── Try Ardent API first (primary source) ─────────────────────────────────
+print("\n" + "-" * 60)
+print(f"[PRIMARY] Ardent Insight API: {_ARDENT_URL}")
+print("-" * 60)
+ardent_ok = False
+try:
+    ardent_prices = _fetch_ardent()
+    print(f"  OK — {len(ardent_prices)} entries returned")
+    for name in ["Void Opal", "Low Temperature Diamonds", "Painite", "Monazite", "Tritium"]:
+        p = ardent_prices.get(name)
+        if p:
+            print(f"    {name:<38} avg={p['avg_sell']:>8,} Cr  max={p['max_sell']:>8,} Cr")
+    print(f"\n[+] Writing cache → {cache_path}")
+    _save_file_cache(cache_path, ardent_prices)
+    print("    Done. Restart the agent to use fresh prices.")
+    ardent_ok = True
+except Exception as e:
+    print(f"  FAILED: {e}")
+
+# ── Choose source for Inara local-HTML fallback ────────────────────────────
 use_local = "--local" in sys.argv or LOCAL_HTML_FILE.exists()
 
 if use_local:
