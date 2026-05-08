@@ -335,6 +335,14 @@ class MiningPanel(BasePanel):
             self._cargo_capacity = capacity
         self._available_limpets = int(data.get("available_limpets", self._available_limpets))
         self._lbl_limpets.config(text=str(self._available_limpets))
+
+        # Prices are piggybacked on the first Status tick after the agent's
+        # background Inara fetch completes (fixes the startup timing race).
+        prices = data.get("commodity_prices")
+        if isinstance(prices, dict) and prices:
+            self._prices = prices
+            self._rebuild_cargo()
+
         self._update_cargo_gauge()
 
     def _on_loadout(self, data: dict) -> None:

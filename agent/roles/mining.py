@@ -163,6 +163,10 @@ class MiningRole(BaseRole):
         # Commodity prices fetched from Inara in a background thread.
         self._prices: dict[str, dict] = {}
         self._prices_lock = threading.Lock()
+        # Set to True once prices are loaded so filter_status() can push them
+        # to already-connected clients on the next Status tick (fixes the race
+        # where get_snapshot() runs before the background thread finishes).
+        self._prices_pending_push: bool = False
         threading.Thread(
             target=self._fetch_prices_bg,
             name="ED-InaraPrices",
@@ -179,6 +183,11 @@ class MiningRole(BaseRole):
             prices = fetch_commodity_prices(cache_path)
             with self._prices_lock:
                 self._prices = prices
+                if prices:
+                    # Signal filter_status() to piggyback prices on the next
+                    # Status tick so already-connected clients get them even
+                    # when get_snapshot() ran before this thread finished.
+                    self._prices_pending_push = True
         except Exception as exc:
             log.warning("MiningRole: could not fetch commodity prices: %s", exc)
 
@@ -376,6 +385,15 @@ class MiningRole(BaseRole):
         self._last_status = payload
         if changed:
             self._save_state()
+
+        # If the background price-fetch finished after the last get_snapshot()
+        # call, piggyback the prices on this Status tick so connected clients
+        # receive them without needing to reconnect.
+        with self._prices_lock:
+            if self._prices_pending_push and self._prices:
+                payload["commodity_prices"] = dict(self._prices)
+                self._prices_pending_push = False
+
         return payload
 
     # ── Event handlers ─────────────────────────────────────────────────────
