@@ -19,21 +19,26 @@ Data source
 
 Cache strategy
 --------------
-  Two layers:
+  Three layers (tried in order):
 
-  1. File cache  — JSON file at a configurable path (typically
-                   ~/.config/ed-cockpit/commodity_prices.json).
+  1. Memory cache — populated from layers below on the first call.
+                   Avoids repeated disk/network I/O within one process run.
+
+  2. File cache   — JSON file at a configurable path (typically
+                   ~/.config/ed-cockpit/commodity_prices.json or
+                   %APPDATA%\\ed-cockpit\\commodity_prices.json on Windows).
                    Written on every successful Inara fetch.
                    Considered fresh for CACHE_MAX_DAYS days.
 
-  2. Memory cache — populated from the file cache (or a fresh fetch)
-                   on the first call within a process run.
-                   Avoids repeated disk reads when get_snapshot() is
-                   called multiple times per session.
+  3. Live fetch   — HTTP request to Inara.  Result is written to the file
+                   cache and stored in memory.
 
-  At agent startup the file is read.  If it is ≤ CACHE_MAX_DAYS old the
-  stored prices are used without any network request.  Only when the file
-  is absent or older than CACHE_MAX_DAYS is a fresh Inara request made.
+  4. Bundled data — If layers 2 and 3 both fail (e.g. Inara is down or the
+                   machine is behind a firewall), the static price list
+                   bundled with the agent (agent/data/mining_commodity_prices.json)
+                   is used as a last resort.  Prices may be slightly outdated
+                   but are always better than nothing.  Update the bundled
+                   file by running:  python check_inara.py
 
 Cache file format
 -----------------
@@ -74,10 +79,26 @@ _INARA_URL      = "https://inara.cz/elite/commodities-list/"
 _HTTP_TIMEOUT   = 15.0   # seconds per request
 CACHE_MAX_DAYS  = 30     # refresh file cache if older than this many days
 
+# Bundled static price list shipped with the agent — used as last resort when
+# Inara is unreachable (firewall, bot detection, site down, etc.).
+_BUNDLED_PRICES_PATH = Path(__file__).parent.parent / "data" / "mining_commodity_prices.json"
+
+# Browser-like headers to avoid bot-detection (Cloudflare, etc.).
+# Inara's commodity list is a public page but some IPs / plain urllib
+# User-Agents are challenged.  Using a realistic browser signature avoids
+# most soft blocks without requiring any credentials.
 _HEADERS = {
-    "User-Agent":      "ED-Cockpit/1.0 (Commodity Price Cache; contact via github)",
-    "Accept":          "text/html,application/xhtml+xml",
-    "Accept-Encoding": "gzip, deflate",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer":         "https://inara.cz/elite/",
+    "Connection":      "keep-alive",
+    "DNT":             "1",
 }
 
 # Match one commodity table row: capture the name from the anchor, then
@@ -149,28 +170,42 @@ def fetch_commodity_prices(
         prices = _parse_commodity_table(html)
     except Exception as exc:
         log.warning("Inara: commodity price fetch failed: %s", exc)
-        # Fall back to a stale file cache rather than returning nothing.
+        prices = {}
+
+    if prices:
+        log.info("Inara: fetched %d commodity prices from Inara", len(prices))
         if cache_path is not None:
-            stale = _load_file_cache(cache_path, ignore_age=True)
-            if stale:
-                log.warning("Inara: using stale file cache as fallback")
-                _MEM_CACHE = stale
-                return _MEM_CACHE
-        return {}
+            _save_file_cache(cache_path, prices)
+        _MEM_CACHE = prices
+        return _MEM_CACHE
 
-    if not prices:
-        log.warning(
-            "Inara: parsed 0 commodities — page structure may have changed"
-        )
-        return {}
+    log.warning(
+        "Inara: live fetch returned 0 commodities "
+        "(bot detection / page structure change / network error)"
+    )
 
-    log.info("Inara: fetched %d commodity prices from Inara", len(prices))
-
+    # ── Stale file cache ────────────────────────────────────────────────────
     if cache_path is not None:
-        _save_file_cache(cache_path, prices)
+        stale = _load_file_cache(cache_path, ignore_age=True)
+        if stale:
+            log.warning(
+                "Inara: using stale file cache as fallback (%d commodities)", len(stale)
+            )
+            _MEM_CACHE = stale
+            return _MEM_CACHE
 
-    _MEM_CACHE = prices
-    return _MEM_CACHE
+    # ── Bundled static prices ───────────────────────────────────────────────
+    bundled = _load_bundled_prices()
+    if bundled:
+        log.warning(
+            "Inara: using bundled static prices as last resort (%d commodities). "
+            "Run 'python check_inara.py' from the agent machine to refresh.",
+            len(bundled),
+        )
+        _MEM_CACHE = bundled
+        return _MEM_CACHE
+
+    return {}
 
 
 def invalidate_memory_cache() -> None:
@@ -214,6 +249,22 @@ def _load_file_cache(
         return None
     except Exception as exc:
         log.warning("Inara: could not read cache file %s: %s", path, exc)
+        return None
+
+
+def _load_bundled_prices() -> Optional[dict[str, dict]]:
+    """Load the static price list bundled with the agent (agent/data/mining_commodity_prices.json).
+
+    Returns the price dict or None if the file cannot be read.
+    """
+    try:
+        raw = json.loads(_BUNDLED_PRICES_PATH.read_text(encoding="utf-8"))
+        prices = raw.get("prices", {})
+        if not isinstance(prices, dict) or not prices:
+            return None
+        return {str(k): dict(v) for k, v in prices.items()}
+    except Exception as exc:
+        log.debug("Inara: could not load bundled prices: %s", exc)
         return None
 
 

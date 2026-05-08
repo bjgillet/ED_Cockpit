@@ -1,0 +1,28 @@
+{
+  "_comment": "Static fallback for Inara commodity prices. Used when the live fetch is blocked or fails. Prices fetched from https://inara.cz/elite/commodities-list/ on 2026-05-08. Update by running: python check_inara.py",
+  "fetched_at": "2026-05-08T05:00:00+00:00",
+  "prices": {
+    "Alexandrite":                    {"avg_sell": 227782,  "max_sell": 685681},
+    "Benitoite":                      {"avg_sell": 164491,  "max_sell": 622948},
+    "Bromellite":                     {"avg_sell": 33691,   "max_sell": 116750},
+    "Coltan":                         {"avg_sell": 6179,    "max_sell": 8754},
+    "Gold":                           {"avg_sell": 47886,   "max_sell": 67781},
+    "Grandidierite":                  {"avg_sell": 211562,  "max_sell": 563640},
+    "Jadeite":                        {"avg_sell": 42378,   "max_sell": 174780},
+    "Low Temperature Diamonds":       {"avg_sell": 131342,  "max_sell": 525825},
+    "Methanol Monohydrate Crystals":  {"avg_sell": 2523,    "max_sell": 3794},
+    "Monazite":                       {"avg_sell": 272087,  "max_sell": 865908},
+    "Musgravite":                     {"avg_sell": 220364,  "max_sell": 810580},
+    "Osmium":                         {"avg_sell": 56531,   "max_sell": 273000},
+    "Painite":                        {"avg_sell": 57621,   "max_sell": 391116},
+    "Palladium":                      {"avg_sell": 52027,   "max_sell": 71438},
+    "Platinum":                       {"avg_sell": 70871,   "max_sell": 302844},
+    "Praseodymium":                   {"avg_sell": 8628,    "max_sell": 11509},
+    "Rhodplumsite":                   {"avg_sell": 186625,  "max_sell": 817287},
+    "Samarium":                       {"avg_sell": 28520,   "max_sell": 48636},
+    "Serendibite":                    {"avg_sell": 186990,  "max_sell": 570948},
+    "Taaffeite":                      {"avg_sell": 52145,   "max_sell": 215320},
+    "Tritium":                        {"avg_sell": 53371,   "max_sell": 61894},
+    "Void Opal":                      {"avg_sell": 150265,  "max_sell": 552666}
+  }
+}
