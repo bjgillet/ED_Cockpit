@@ -25,16 +25,22 @@ Result waypoint structure
 Each element returned by ``fetch_fleet_carrier_route`` is a dict:
 
     {
-        "system":    str,    # system name
+        "system":    str,    # system name  (API field: "name")
         "x":         float,  # galactic X coordinate (LY)
         "y":         float,  # galactic Y coordinate (LY)
         "z":         float,  # galactic Z coordinate (LY)
-        "distance":  float,  # distance jumped from previous waypoint (LY)
-        "fuel_cost": float,  # tritium cost for this hop (tonnes)
+        "distance":  float,  # distance jumped from previous waypoint (LY)  (API field: "distance")
+        "fuel_cost": float,  # tritium cost for this hop (tonnes)  (API field: "fuel_used")
     }
 
 The first waypoint is always the source system with distance=0 and
 fuel_cost=0.
+
+Actual Spansh API hop fields (relevant subset):
+  "name"      → system name
+  "x", "y", "z" → galactic coordinates
+  "distance"  → jump distance from previous hop (LY)
+  "fuel_used" → tritium consumed for this hop (tonnes)
 """
 from __future__ import annotations
 
@@ -209,12 +215,12 @@ def _parse_waypoints(result: dict) -> list[dict[str, Any]]:
     waypoints: list[dict[str, Any]] = []
     for hop in jumps:
         waypoints.append({
-            "system":    str(hop.get("system", "")),
+            "system":    str(hop.get("name", "")),
             "x":         float(hop.get("x", 0.0)),
             "y":         float(hop.get("y", 0.0)),
             "z":         float(hop.get("z", 0.0)),
-            "distance":  float(hop.get("distance_jumped", 0.0)),
-            "fuel_cost": float(hop.get("fuel_cost",       0.0)),
+            "distance":  float(hop.get("distance",  0.0)),
+            "fuel_cost": float(hop.get("fuel_used", 0.0)),
         })
 
     return waypoints
