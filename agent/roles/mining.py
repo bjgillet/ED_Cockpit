@@ -53,6 +53,10 @@ Events handled
                        stays correct even when a Cargo snapshot does not follow.
   BuyDrones          — limpets purchased; increases available limpets.
   SellDrones         — limpets sold; decreases available limpets.
+  EjectCargo         — item(s) ejected from cargo.  If ``Type`` contains
+                       "drone", ``Count`` limpets are removed from the
+                       available count.  Otherwise the commodity is removed
+                       from the refined-cargo tally by ``Count`` units.
 
 Wire payload shapes
 -------------------
@@ -88,6 +92,14 @@ Wire payload shapes
       "event":               "CargoTransfer",
       "refined_cargo_tally": {<ore>: <int t>, ...},
       "available_limpets":   <int>,
+    }
+
+  EjectCargo →
+    {
+      "event":               "EjectCargo",
+      "refined_cargo_tally": {<ore>: <int t>, ...},
+      "available_limpets":   <int>,
+      "cargo":               <float t>,   # updated cargo used after ejection
     }
 
 Status payload (filter_status) →
@@ -133,6 +145,7 @@ class MiningRole(BaseRole):
         "Docked",
         "BuyDrones",
         "SellDrones",
+        "EjectCargo",
     })
 
     def __init__(self) -> None:
@@ -366,6 +379,8 @@ class MiningRole(BaseRole):
             return self._handle_buy_drones(data)
         if event_name == "SellDrones":
             return self._handle_sell_drones(data)
+        if event_name == "EjectCargo":
+            return self._handle_eject_cargo(data)
         return None
 
     def filter_status(self, status: dict) -> dict | None:
@@ -743,6 +758,53 @@ class MiningRole(BaseRole):
             "count": amount,
             "available_limpets": self._available_limpets,
             "cargo": float(self._last_status.get("cargo", 0.0)),
+        }
+
+    def _handle_eject_cargo(self, data: dict) -> dict | None:
+        """
+        Handle an EjectCargo journal event.
+
+        ``Type`` "drones" (case-insensitive, partial match) → decrease
+        available limpets by ``Count``.
+        Any other ``Type`` → remove ``Count`` units from the refined-cargo
+        tally (no-op if the commodity is not currently tracked).
+        In both cases the running cargo-used figure is reduced by ``Count``.
+        """
+        try:
+            count = int(data.get("Count", 0))
+        except (TypeError, ValueError):
+            count = 0
+        if count <= 0:
+            return None
+
+        raw_type   = str(data.get("Type", "")).strip()
+        type_lower = raw_type.lower()
+
+        if "drone" in type_lower:
+            self._available_limpets = max(0, self._available_limpets - count)
+        else:
+            tracked_name = self._find_tracked_name(raw_type)
+            if tracked_name is not None:
+                new_count = max(0, self._cargo_tally.get(tracked_name, 0) - count)
+                if new_count == 0:
+                    self._cargo_tally.pop(tracked_name, None)
+                else:
+                    self._cargo_tally[tracked_name] = new_count
+
+        self._last_status["cargo"] = max(
+            0.0,
+            float(self._last_status.get("cargo", 0.0)) - float(count),
+        )
+        self._save_state()
+        log.info(
+            "MiningRole: EjectCargo — type=%r count=%d  limpets=%d",
+            raw_type, count, self._available_limpets,
+        )
+        return {
+            "event":               "EjectCargo",
+            "refined_cargo_tally": dict(self._cargo_tally),
+            "available_limpets":   self._available_limpets,
+            "cargo":               float(self._last_status.get("cargo", 0.0)),
         }
 
     @staticmethod

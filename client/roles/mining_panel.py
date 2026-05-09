@@ -122,7 +122,10 @@ class MiningPanel(BasePanel):
         cargo.columnconfigure(1, weight=1)
 
         self._cargo_frame = cargo
-        self._cargo_rows: dict[str, tk.Label] = {}
+        # Pool of reusable row widget tuples: (name_lbl, count_lbl, price_lbl,
+        # name_var, count_var, price_var).  Grown on demand; rows are shown /
+        # hidden with grid() / grid_remove() so they are never destroyed.
+        self._cargo_rows_pool: list[tuple] = []
 
         # Estimated cargo value row (shown when commodity prices are available)
         est_row = tk.Frame(cargo_outer, bg=PANEL_BG)
@@ -244,6 +247,8 @@ class MiningPanel(BasePanel):
             self._on_buy_drones(data)
         elif event == "SellDrones":
             self._on_sell_drones(data)
+        elif event == "EjectCargo":
+            self._on_eject_cargo(data)
 
     # ── Internal handlers ──────────────────────────────────────────────────
 
@@ -295,15 +300,25 @@ class MiningPanel(BasePanel):
         for w in self._mat_frame.winfo_children():
             w.destroy()
 
-        self._mat_frame.columnconfigure(1, weight=1)
+        prices_ci = {k.lower(): v for k, v in self._prices.items()} if self._prices else {}
+
+        self._mat_frame.columnconfigure(1, weight=0)
+        self._mat_frame.columnconfigure(2, weight=1)
         for i, m in enumerate(data.get("materials", [])):
-            pct = m.get("proportion", 0.0)
-            fg  = GREEN_FG if pct >= 20 else (HEADER_FG if pct >= 10 else TEXT_FG)
-            tk.Label(self._mat_frame, text=f"  {m.get('name', '—')}",
+            name = m.get("name", "—")
+            pct  = m.get("proportion", 0.0)
+            fg   = GREEN_FG if pct >= 20 else (HEADER_FG if pct >= 10 else TEXT_FG)
+            tk.Label(self._mat_frame, text=f"  {name}",
                      bg=PANEL_BG, fg=fg, font=FONT_BODY,
                      anchor="w").grid(row=i, column=0, sticky="w", padx=8)
             tk.Label(self._mat_frame, text=f"{pct:.1f}%",
-                     bg=PANEL_BG, fg=fg, font=FONT_BODY).grid(row=i, column=1, sticky="w")
+                     bg=PANEL_BG, fg=fg, font=FONT_BODY,
+                     anchor="w").grid(row=i, column=1, sticky="w", padx=(0, 8))
+            avg_sell = prices_ci.get(name.lower(), {}).get("avg_sell", 0)
+            price_text = f"~{avg_sell:,} Cr/t" if avg_sell else ""
+            tk.Label(self._mat_frame, text=price_text,
+                     bg=PANEL_BG, fg=ORANGE_FG, font=FONT_PATH,
+                     anchor="w").grid(row=i, column=2, sticky="w")
 
     def _on_refined(self, data: dict) -> None:
         ore = data.get("type", "Unknown")
@@ -430,6 +445,18 @@ class MiningPanel(BasePanel):
             self._cargo_used = float(cargo_val)
             self._update_cargo_gauge()
 
+    def _on_eject_cargo(self, data: dict) -> None:
+        self._available_limpets = int(data.get("available_limpets", self._available_limpets))
+        self._lbl_limpets.config(text=str(self._available_limpets))
+        tally = data.get("refined_cargo_tally")
+        if isinstance(tally, dict):
+            self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
+            self._rebuild_cargo()
+        cargo_val = data.get("cargo")
+        if cargo_val is not None:
+            self._cargo_used = float(cargo_val)
+        self._update_cargo_gauge()
+
     def _update_cargo_gauge(self) -> None:
         capacity = max(self._cargo_capacity, 0.0)
         used = max(self._cargo_used, 0.0)
@@ -446,29 +473,55 @@ class MiningPanel(BasePanel):
         self._cargo_bar.configure(style=style)
 
     def _rebuild_cargo(self) -> None:
-        for w in self._cargo_frame.winfo_children():
-            w.destroy()
         self._cargo_frame.columnconfigure(1, weight=1)
         self._cargo_frame.columnconfigure(2, weight=1)
 
-        total_est = 0
+        total_est  = 0
         has_prices = bool(self._prices)
+        prices_ci  = {k.lower(): v for k, v in self._prices.items()} if has_prices else {}
+        items      = sorted(self._cargo.items())
 
-        for i, (ore, count) in enumerate(sorted(self._cargo.items())):
-            tk.Label(self._cargo_frame, text=f"  {ore}",
-                     bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY,
-                     anchor="w").grid(row=i, column=0, sticky="w", padx=8)
-            tk.Label(self._cargo_frame, text=f"{count} t",
-                     bg=PANEL_BG, fg=ACCENT_FG, font=FONT_BOLD,
-                     ).grid(row=i, column=1, sticky="w")
+        # Grow the pool when new ore types appear.
+        while len(self._cargo_rows_pool) < len(items):
+            row = len(self._cargo_rows_pool)
+            name_var  = tk.StringVar()
+            count_var = tk.StringVar()
+            price_var = tk.StringVar()
+            name_lbl = tk.Label(self._cargo_frame, textvariable=name_var,
+                                bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY, anchor="w")
+            count_lbl = tk.Label(self._cargo_frame, textvariable=count_var,
+                                 bg=PANEL_BG, fg=ACCENT_FG, font=FONT_BOLD)
+            price_lbl = tk.Label(self._cargo_frame, textvariable=price_var,
+                                 bg=PANEL_BG, fg=ORANGE_FG, font=FONT_PATH)
+            name_lbl.grid( row=row, column=0, sticky="w", padx=8)
+            count_lbl.grid(row=row, column=1, sticky="w")
+            price_lbl.grid(row=row, column=2, sticky="w", padx=(4, 8))
+            self._cargo_rows_pool.append(
+                (name_lbl, count_lbl, price_lbl, name_var, count_var, price_var)
+            )
+
+        # Update visible rows in-place (no widget destruction → no flicker).
+        for i, (ore, count) in enumerate(items):
+            name_lbl, count_lbl, price_lbl, name_var, count_var, price_var = \
+                self._cargo_rows_pool[i]
+            name_var.set(f"  {ore}")
+            count_var.set(f"{count} t")
             if has_prices:
-                avg_sell = self._prices.get(ore, {}).get("avg_sell", 0)
-                ore_value = count * avg_sell
-                total_est += ore_value
-                price_text = f"~{ore_value:,} Cr" if avg_sell else ""
-                tk.Label(self._cargo_frame, text=price_text,
-                         bg=PANEL_BG, fg=ORANGE_FG, font=FONT_PATH,
-                         ).grid(row=i, column=2, sticky="w", padx=(4, 8))
+                avg_sell = prices_ci.get(ore.lower(), {}).get("avg_sell", 0)
+                total_est += count * avg_sell
+                price_var.set(f"~{avg_sell:,} Cr/t" if avg_sell else "")
+            else:
+                price_var.set("")
+            name_lbl.grid( row=i, column=0, sticky="w", padx=8)
+            count_lbl.grid(row=i, column=1, sticky="w")
+            price_lbl.grid(row=i, column=2, sticky="w", padx=(4, 8))
+
+        # Hide pool rows that are no longer needed.
+        for i in range(len(items), len(self._cargo_rows_pool)):
+            name_lbl, count_lbl, price_lbl, *_ = self._cargo_rows_pool[i]
+            name_lbl.grid_remove()
+            count_lbl.grid_remove()
+            price_lbl.grid_remove()
 
         if has_prices:
             self._lbl_est_value.config(

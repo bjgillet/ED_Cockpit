@@ -25,7 +25,7 @@ Button actions (sent to the agent as ActionMessages)
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
 from client.roles.base_panel import BasePanel
 from shared.roles_def import Role
@@ -262,7 +262,7 @@ class RoutePanel(BasePanel):
     def _on_copy_next(self) -> None:
         system = self._next_waypoint_system()
         if not system:
-            messagebox.showinfo("Copy Waypoint", "No next waypoint available.")
+            self._set_status("No next waypoint available.", GREY_FG)
             return
         self.send_action("clipboard", system)
         self._set_status(f"Sent to agent clipboard: {system}", GREEN_FG)
@@ -270,7 +270,7 @@ class RoutePanel(BasePanel):
     def _on_call_back_fc(self) -> None:
         system = self._state.get("ship_system", "")
         if not system:
-            messagebox.showinfo("Call Back FC", "Ship position unknown.")
+            self._set_status("Ship position unknown.", GREY_FG)
             return
         self.send_action("clipboard", system)
         self._set_status(f"Sent to agent clipboard: {system}", GREEN_FG)
