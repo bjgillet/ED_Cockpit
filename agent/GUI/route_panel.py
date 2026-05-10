@@ -433,11 +433,14 @@ class _NewRouteDialog(tk.Toplevel):
                      font=FONT_BOLD, anchor="w").grid(
                 row=r, column=0, sticky="w", pady=3, padx=(0, 8))
 
-        # FC Location (read-only)
+        _ENTRY = dict(bg="#1a1a3a", fg=TEXT_FG, insertbackground=TEXT_FG,
+                      font=FONT_BODY, relief="flat", width=34)
+
+        # FC Location (editable)
         row_label(0, "FC Location :")
-        tk.Label(body, text=fc_system or "Unknown",
-                 bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY, anchor="w",
-                 width=32).grid(row=0, column=1, sticky="ew")
+        self._src_var = tk.StringVar(value=fc_system or "")
+        src_entry = tk.Entry(body, textvariable=self._src_var, **_ENTRY)
+        src_entry.grid(row=0, column=1, sticky="ew", pady=(4, 2))
 
         # Tritium available (read-only)
         row_label(1, "Tritium avl. :")
@@ -448,9 +451,7 @@ class _NewRouteDialog(tk.Toplevel):
         # Destination entry
         row_label(2, "Destination :")
         self._dest_var = tk.StringVar(value=last_dest)
-        entry = tk.Entry(body, textvariable=self._dest_var,
-                         bg="#1a1a3a", fg=TEXT_FG, insertbackground=TEXT_FG,
-                         font=FONT_BODY, relief="flat", width=34)
+        entry = tk.Entry(body, textvariable=self._dest_var, **_ENTRY)
         entry.grid(row=2, column=1, sticky="ew", pady=(4, 8))
         entry.focus_set()
         entry.icursor("end")
@@ -480,9 +481,13 @@ class _NewRouteDialog(tk.Toplevel):
         entry.bind("<Escape>", lambda _e: self.destroy())
 
     def _on_plan(self) -> None:
+        source      = self._src_var.get().strip()
         destination = self._dest_var.get().strip()
+        if not source:
+            self._lbl_status.config(text="Please enter a source (FC location) system.", fg="red")
+            return
         if not destination:
             self._lbl_status.config(text="Please enter a destination system.", fg="red")
             return
-        self._app.plan_route(destination)
+        self._app.plan_route(destination, source=source)
         self.destroy()

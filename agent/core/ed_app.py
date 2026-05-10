@@ -305,7 +305,7 @@ class EDApp:
 
     # ── Route planning (public entry point, thread-safe) ───────────────────
 
-    def plan_route(self, destination: str) -> None:
+    def plan_route(self, destination: str, source: str = "") -> None:
         """
         Trigger fleet-carrier route planning to ``destination``.
 
@@ -314,6 +314,14 @@ class EDApp:
 
         Can be called from any thread (tkinter main thread, asyncio thread,
         or any background thread).
+
+        Parameters
+        ----------
+        destination : str
+            Target system name.
+        source : str, optional
+            Override the source system.  When empty (default) the current
+            FC system known to the RouteRole is used.
 
         The result is applied to the RouteRole and broadcast to all
         connected clients.  GUI panels subscribed via
@@ -326,10 +334,10 @@ class EDApp:
         # Works whether this method is called from the tkinter thread or
         # the asyncio thread.
         asyncio.run_coroutine_threadsafe(
-            self._plan_route_async(destination), self._loop
+            self._plan_route_async(destination, source=source), self._loop
         )
 
-    async def _plan_route_async(self, destination: str) -> None:
+    async def _plan_route_async(self, destination: str, source: str = "") -> None:
         """Coroutine: call Spansh API in executor, update role, broadcast."""
         from agent.tools.spansh import fetch_fleet_carrier_route, SpanshRouteError
         from agent.roles.route import RouteRole as _RouteRole
@@ -339,12 +347,17 @@ class EDApp:
             log.error("_plan_route_async: RouteRole not registered.")
             return
 
-        fc_system = route_role.fc_system
+        fc_system = source.strip() or route_role.fc_system
         if not fc_system:
             log.warning("_plan_route_async: FC system unknown — cannot plan route.")
-            # Notify GUI of the error via the role
             route_role._notify_gui("RouteError", {"message": "FC position unknown."})
             return
+
+        # If the user supplied an explicit source, sync it into the role so
+        # that subsequent operations (e.g. waypoint matching) are consistent.
+        if source.strip() and source.strip() != route_role.fc_system:
+            with route_role._lock:
+                route_role._fc_system = source.strip()
 
         # Notify GUI that planning has started
         route_role._notify_gui("RoutePending", {

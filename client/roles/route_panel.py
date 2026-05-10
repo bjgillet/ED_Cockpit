@@ -175,9 +175,8 @@ class RoutePanel(BasePanel):
         tree.column("fuel_cost", width=75,  minwidth=55,  stretch=False, anchor="e")
         tree.column("done",      width=50,  minwidth=40,  stretch=False, anchor="center")
 
-        tree.tag_configure("done",    foreground=HEADER_FG)
-        tree.tag_configure("current", foreground=HEADER_FG)
-        tree.tag_configure("future",  foreground=TEXT_FG)
+        tree.tag_configure("done",   foreground=HEADER_FG)
+        tree.tag_configure("future", foreground=TEXT_FG)
 
         return tree, v_sb, h_sb
 
@@ -233,15 +232,13 @@ class RoutePanel(BasePanel):
 
             dist_txt = f"{distance:.1f} LY" if distance else "—"
             fuel_txt = f"{fuel:.0f} t"      if fuel     else "—"
-            done_txt = "yes" if done else "—"
 
-            if done and i < current_idx:
-                tag = "done"
-            elif i == current_idx:
-                tag = "current"
-                done_txt = "→"
+            if done:
+                tag      = "done"
+                done_txt = "yes"
             else:
-                tag = "future"
+                tag      = "future"
+                done_txt = "—"
 
             self._tree.insert(
                 "", "end",

@@ -149,8 +149,15 @@ class RouteRole(BaseRole):
             self._source      = source
             self._destination = destination
             self._total_distance = sum(w["distance"] for w in waypoints)
-            # Locate the FC in the new waypoint list
+            # Locate the FC in the new waypoint list.
+            # If the FC system is unknown or doesn't match any waypoint yet,
+            # default to index 0: the source is by definition where the FC is
+            # at route-creation time.
             self._current_idx = self._find_fc_waypoint_index()
+            if self._current_idx == -1 and self._waypoints:
+                self._current_idx = 0
+                if not self._fc_system:
+                    self._fc_system = source
 
         snapshot = self._build_state_dict()
         self._save_state()
