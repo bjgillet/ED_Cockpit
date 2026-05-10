@@ -288,7 +288,13 @@ class RouteRole(BaseRole):
         sourced from the matching waypoint entry in the loaded route.
         If the system is not in the route (e.g. a manual jump outside the
         planned route) the FC position is updated without new coordinates.
+
+        Events with ``CarrierType != "FleetCarrier"`` (e.g. SquadronCarrier)
+        are ignored.
         """
+        if data.get("CarrierType") != "FleetCarrier":
+            return None
+
         system = str(data.get("StarSystem", ""))
         if not system:
             return None
