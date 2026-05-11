@@ -80,10 +80,26 @@ class RoutePanel(BasePanel):
         info.pack(fill="x", padx=4, pady=(0, 2))
         info.columnconfigure(1, weight=1)
 
-        self._lbl_fc_loc   = self._make_info_row(info, 0, "FC Location :")
-        self._lbl_distance = self._make_info_row(info, 1, "Total dist.  :")
-        self._lbl_trit_avl = self._make_info_row(info, 2, "Tritium avl. :")
-        self._lbl_trit_ndd = self._make_info_row(info, 3, "Tritium ndd. :")
+        self._lbl_fc_loc = self._make_info_row(info, 0, "FC Location :")
+
+        # Compact single-line row for distance + tritium figures
+        stats_row = tk.Frame(info, bg=PANEL_BG)
+        stats_row.grid(row=1, column=0, columnspan=2, sticky="ew", padx=4, pady=1)
+
+        _LBL = dict(bg=PANEL_BG, fg=ACCENT,  font=FONT_BOLD)
+        _VAL = dict(bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY)
+
+        tk.Label(stats_row, text="Total dist. :",  **_LBL).pack(side="left", padx=(4, 2))
+        self._lbl_distance = tk.Label(stats_row, text="—", **_VAL)
+        self._lbl_distance.pack(side="left", padx=(0, 10))
+
+        tk.Label(stats_row, text="Tritium avl. :", **_LBL).pack(side="left", padx=(0, 2))
+        self._lbl_trit_avl = tk.Label(stats_row, text="—", **_VAL)
+        self._lbl_trit_avl.pack(side="left", padx=(0, 10))
+
+        tk.Label(stats_row, text="Tritium ndd. :", **_LBL).pack(side="left", padx=(0, 2))
+        self._lbl_trit_ndd = tk.Label(stats_row, text="—", **_VAL)
+        self._lbl_trit_ndd.pack(side="left", padx=(0, 4))
 
         self._lbl_status = tk.Label(
             fc_section, text="", bg=BG, fg=GREY_FG,

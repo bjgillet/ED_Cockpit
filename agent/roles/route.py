@@ -309,10 +309,22 @@ class RouteRole(BaseRole):
         with self._lock:
             self._fc_system = system
             if self._waypoints:
+                old_idx = self._current_idx
                 self._current_idx = self._find_fc_waypoint_index()
                 if self._current_idx >= 0:
                     wp = self._waypoints[self._current_idx]
                     self._fc_coords = (float(wp["x"]), float(wp["y"]), float(wp["z"]))
+                    # Deduct fuel consumed for this jump when the FC actually
+                    # advanced to a new waypoint (index 0 is the departure
+                    # point, so fuel_cost there is 0 / not a real jump).
+                    if self._current_idx > 0 and self._current_idx > old_idx:
+                        fuel_used = float(wp.get("fuel_cost", 0.0))
+                        self._tritium = max(0.0, self._tritium - fuel_used)
+                        log.info(
+                            "RouteRole: CarrierLocation — deducted %.0f t tritium "
+                            "(now %.0f t)",
+                            fuel_used, self._tritium,
+                        )
 
         payload = self._build_state_dict()
         payload["event"] = "RouteProgress"
@@ -334,7 +346,18 @@ class RouteRole(BaseRole):
             if coords:
                 self._fc_coords = coords
             if self._waypoints:
+                old_idx = self._current_idx
                 self._current_idx = self._find_fc_waypoint_index()
+                if self._current_idx > 0 and self._current_idx > old_idx:
+                    fuel_used = float(
+                        self._waypoints[self._current_idx].get("fuel_cost", 0.0)
+                    )
+                    self._tritium = max(0.0, self._tritium - fuel_used)
+                    log.info(
+                        "RouteRole: CarrierJump — deducted %.0f t tritium "
+                        "(now %.0f t)",
+                        fuel_used, self._tritium,
+                    )
 
         payload = self._build_state_dict()
         payload["event"] = "RouteProgress"
