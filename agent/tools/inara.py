@@ -70,49 +70,21 @@ _HEADERS = {
 # The Ardent API uses lowercase journal internal names (e.g. "lowtemperaturediamond").
 # The panel and cargo tally use localised display names ("Low Temperature Diamonds").
 # This mapping covers all common mining commodities and the most traded metals.
+# Maps Ardent API internal names (lowercase, no spaces) to the localised
+# display names used by MiningRefined journal events.
+#
+# Only entries where the display name CANNOT be derived by stripping spaces
+# and normalising case belong here.  For example "bertrandite" → "Bertrandite"
+# does NOT need an entry because the client panel's tier-2 normalised lookup
+# handles it automatically.  Entries below cover cases where the internal name
+# is a genuinely different word from the display name (e.g. "opal" → "Void Opal")
+# or where pluralisation makes the names diverge after normalisation.
 _INTERNAL_TO_DISPLAY: dict[str, str] = {
-    "alexandrite":                   "Alexandrite",
-    "benitoite":                     "Benitoite",
-    "bertrandite":                   "Bertrandite",
-    "bromellite":                    "Bromellite",
-    "coltan":                        "Coltan",
-    "gold":                          "Gold",
-    "grandidierite":                 "Grandidierite",
-    "jadeite":                       "Jadeite",
-    "lowtemperaturediamond":         "Low Temperature Diamonds",
-    "methanolmonohydratecrystals":   "Methanol Monohydrate Crystals",
-    "monazite":                      "Monazite",
-    "musgravite":                    "Musgravite",
-    "osmium":                        "Osmium",
+    # Internal name differs from display name (different word / truncated)
     "opal":                          "Void Opal",
-    "painite":                       "Painite",
-    "palladium":                     "Palladium",
-    "platinum":                      "Platinum",
-    "praseodymium":                  "Praseodymium",
-    "rhodplumsite":                  "Rhodplumsite",
-    "samarium":                      "Samarium",
-    "serendibite":                   "Serendibite",
-    "silver":                        "Silver",
-    "taaffeite":                     "Taaffeite",
-    "titanium":                      "Titanium",
-    "tritium":                       "Tritium",
-    # common metals mined in laser / core mining
-    "bauxite":                       "Bauxite",
-    "beryllium":                     "Beryllium",
-    "cobalt":                        "Cobalt",
-    "copper":                        "Copper",
-    "gallite":                       "Gallite",
-    "gallium":                       "Gallium",
-    "indite":                        "Indite",
-    "indium":                        "Indium",
-    "lepidolite":                    "Lepidolite",
-    "lithium":                       "Lithium",
-    "methane clathrate":             "Methane Clathrate",
-    "moissanite":                    "Moissanite",
-    "pyrophyllite":                  "Pyrophyllite",
-    "rutile":                        "Rutile",
-    "uraninite":                     "Uraninite",
-    "void opal":                     "Void Opal",
+    "lowtemperaturediamond":         "Low Temperature Diamonds",
+    # Commodity names whose internal form omits a significant word
+    "methanolmonohydratecrystals":   "Methanol Monohydrate Crystals",
 }
 
 # ── In-memory layer (process-lifetime cache) ───────────────────────────────────

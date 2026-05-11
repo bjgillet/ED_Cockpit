@@ -12,6 +12,7 @@ Displays live mining data received from the agent:
 """
 from __future__ import annotations
 
+import re
 import tkinter as tk
 from tkinter import ttk
 
@@ -39,10 +40,46 @@ _CONTENT_COLORS = {
 }
 
 _BAR_W = 160
+
+_RE_NORM = re.compile(r'[\s_\-]+')
+
+
+def _norm_name(s: str) -> str:
+    """Normalise a commodity name for fuzzy lookup.
+
+    Strips spaces, underscores and hyphens then lowercases so that
+    "Methane Clathrate" and "methaneclathrate" resolve to the same key.
+    """
+    return _RE_NORM.sub("", s).lower()
+
+
 class MiningPanel(BasePanel):
     """Live mining panel: asteroid composition + refined ore tally."""
     _debug = False
     role_name = Role.MINING
+
+    # ── Price lookup helpers ────────────────────────────────────────────────
+
+    def _apply_prices(self, prices: dict) -> None:
+        """Store prices and rebuild both lookup indexes."""
+        self._prices      = prices
+        self._prices_ci   = {k.lower(): v for k, v in prices.items()}
+        self._prices_norm = {_norm_name(k): v for k, v in prices.items()}
+
+    def _lookup_price(self, ore: str) -> int:
+        """Return avg_sell for *ore* using a two-tier case/normalisation fallback.
+
+        Tier 1: case-insensitive exact match  → handles "Bertrandite" vs "bertrandite".
+        Tier 2: normalised match (strip spaces/underscores, lowercase)
+                → handles "Methane Clathrate" vs "methaneclathrate".
+        Returns 0 when no price data is available.
+        """
+        entry = (self._prices_ci.get(ore.lower())
+                 or self._prices_norm.get(_norm_name(ore))
+                 or {})
+        return entry.get("avg_sell", 0)
+
+    # ── UI construction ────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         self.configure(style="TFrame")
@@ -212,7 +249,9 @@ class MiningPanel(BasePanel):
         self._cargo_used: float = 0.0
         self._cargo_capacity: float = 0.0
         self._available_limpets: int = 0
-        self._prices: dict[str, dict] = {}   # commodity name → {avg_sell, max_sell}
+        self._prices:      dict[str, dict] = {}  # raw prices as received
+        self._prices_ci:   dict[str, dict] = {}  # lowercase-keyed (tier-1 lookup)
+        self._prices_norm: dict[str, dict] = {}  # normalised-keyed (tier-2 lookup)
 
         self.after_idle(self._scroll.refresh_layout)
 
@@ -276,7 +315,7 @@ class MiningPanel(BasePanel):
 
         prices = data.get("commodity_prices")
         if isinstance(prices, dict) and prices:
-            self._prices = prices
+            self._apply_prices(prices)
 
         status = data.get("status", {})
         if status:
@@ -300,8 +339,6 @@ class MiningPanel(BasePanel):
         for w in self._mat_frame.winfo_children():
             w.destroy()
 
-        prices_ci = {k.lower(): v for k, v in self._prices.items()} if self._prices else {}
-
         self._mat_frame.columnconfigure(1, weight=0)
         self._mat_frame.columnconfigure(2, weight=1)
         for i, m in enumerate(data.get("materials", [])):
@@ -314,7 +351,7 @@ class MiningPanel(BasePanel):
             tk.Label(self._mat_frame, text=f"{pct:.1f}%",
                      bg=PANEL_BG, fg=fg, font=FONT_BODY,
                      anchor="w").grid(row=i, column=1, sticky="w", padx=(0, 8))
-            avg_sell = prices_ci.get(name.lower(), {}).get("avg_sell", 0)
+            avg_sell   = self._lookup_price(name)
             price_text = f"~{avg_sell:,} Cr/t" if avg_sell else ""
             tk.Label(self._mat_frame, text=price_text,
                      bg=PANEL_BG, fg=ORANGE_FG, font=FONT_PATH,
@@ -355,7 +392,7 @@ class MiningPanel(BasePanel):
         # background Inara fetch completes (fixes the startup timing race).
         prices = data.get("commodity_prices")
         if isinstance(prices, dict) and prices:
-            self._prices = prices
+            self._apply_prices(prices)
             self._rebuild_cargo()
 
         self._update_cargo_gauge()
@@ -478,7 +515,6 @@ class MiningPanel(BasePanel):
 
         total_est  = 0
         has_prices = bool(self._prices)
-        prices_ci  = {k.lower(): v for k, v in self._prices.items()} if has_prices else {}
         items      = sorted(self._cargo.items())
 
         # Grow the pool when new ore types appear.
@@ -507,7 +543,7 @@ class MiningPanel(BasePanel):
             name_var.set(f"  {ore}")
             count_var.set(f"{count} t")
             if has_prices:
-                avg_sell = prices_ci.get(ore.lower(), {}).get("avg_sell", 0)
+                avg_sell = self._lookup_price(ore)
                 total_est += count * avg_sell
                 price_var.set(f"~{avg_sell:,} Cr/t" if avg_sell else "")
             else:
