@@ -12,6 +12,11 @@ Events handled
                       of a body.  Initialises a first-footfall context entry
                       ``(system, body) → False`` (scanned, not yet landed on).
                       Not forwarded to clients.
+  Scan              — FSS / auto scan result; only ``ScanType="Detailed"``
+                      events are processed.  When ``WasFootfalled=True`` the
+                      body's FF context is locked to ``True`` immediately so the
+                      Disembark handler will never treat it as a first footfall.
+                      Not forwarded to clients.
   Disembark         — player steps off ship/SRV onto a planet surface.
                       Treated as a confirmed first footfall when the body has a
                       pending context entry (``False``) from ``SAAScanComplete``
@@ -166,6 +171,7 @@ class ExobiologyRole(BaseRole):
         "Location",         # track current system name on game load
         "SAASignalsFound",
         "SAAScanComplete",  # initialise first-footfall context per body
+        "Scan",             # detailed FSS scan — carries WasFootfalled flag
         "ScanOrganic",
         "SellOrganicData",
         "CodexEntry",
@@ -390,6 +396,8 @@ class ExobiologyRole(BaseRole):
             return None   # not forwarded to clients
         if event_name == "SAAScanComplete":
             return self._handle_SAAScanComplete(data)
+        if event_name == "Scan":
+            return self._handle_scan(data)
         if event_name == "Disembark":
             return self._handle_disembark(data)
         if event_name == "ScanOrganic":
@@ -406,6 +414,42 @@ class ExobiologyRole(BaseRole):
         return None
 
     # ── Event handlers ─────────────────────────────────────────────────────
+
+    def _handle_scan(self, data: dict) -> None:
+        """
+        Handle a Scan journal event.
+
+        Only detailed-type scans are relevant here.  When the game reports
+        ``WasFootfalled=True`` we immediately lock the first-footfall context
+        for that body so the Disembark handler will never treat it as a first
+        footfall — regardless of whether SAAScanComplete has already fired or
+        will fire later.
+
+        ``WasFootfalled=False`` is intentionally ignored: the opportunity is
+        real but confirmation still comes from the SAAScanComplete → Disembark
+        sequence so we let that path run unchanged.
+        """
+        if "detailed" not in str(data.get("ScanType", "")).lower():
+            return None
+
+        body   = data.get("BodyName", "")
+        system = data.get("StarSystem", "") or self._system
+        if not body or not system:
+            return None
+
+        if not bool(data.get("WasFootfalled", False)):
+            return None   # still a candidate — let SAAScanComplete / Disembark decide
+
+        key = (system, body)
+        if self._ff_context.get(key) is not True:
+            self._ff_context[key] = True
+            log.debug(
+                "ExobiologyRole: %s / %s already footfalled (Scan/WasFootfalled=True)"
+                " — FF context locked",
+                system, body,
+            )
+            self._save_state()
+        return None   # not forwarded to clients
 
     def _handle_SAAScanComplete(self, data: dict) -> None:
         """

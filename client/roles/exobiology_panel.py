@@ -49,7 +49,6 @@ BioScanTable receives a list grouped by system:
                           "scanned_cr":   "<cr>",
                           "hist":         "<scan count>",
                           "done":         "Y" | "",
-                          "gc":           <bool>,
                         },
                         ...
                     ],
@@ -553,9 +552,8 @@ class ExobiologyPanel(BasePanel):
                 species_rows   = []
 
                 for sp_key, sp in bentry["species"].items():
-                    done    = sp.get("scan_count", 0) >= _SCANS_REQUIRED
-                    gc_done = done and sp.get("sold", False)
-                    val     = sp.get("value", 0) * ff_mult
+                    done = sp.get("scan_count", 0) >= _SCANS_REQUIRED
+                    val  = sp.get("value", 0) * ff_mult
 
                     if sp.get("sold"):
                         # Already sold — show in scanned column with GC marker
@@ -585,7 +583,6 @@ class ExobiologyPanel(BasePanel):
                         "scanned_cr":   _fmt_cr(scanned_cr)   if scanned_cr   else "",
                         "hist":         str(sp.get("scan_count", 0)),
                         "done":         "Y" if done else "",
-                        "gc":           gc_done,
                         "placeholder":  placeholder,
                     })
 

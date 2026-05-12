@@ -2,7 +2,7 @@
 BioScan Table — tkinter/ttk hierarchical table.
 3-level layout: SYSTEM (root) → BODY (parent) → SPECIES (child).
 
-Columns: SPECIES | REMAINING CR | SCANNED CR | HIST | DONE | GC
+Columns: SPECIES | REMAINING CR | SCANNED CR | HIST | DONE
 """
 import tkinter as tk
 from tkinter import ttk
@@ -35,9 +35,9 @@ SAMPLE_DATA = [
                 "remaining_cr": "0",
                 "scanned_cr":   "5,264,500",
                 "species": [
-                    {"name": "Bacterium Aurasus - Teal",   "scanned_cr": "1,000,000", "hist": "4",  "done": "Y", "gc": True},
-                    {"name": "Tubus Conifer - Teal",        "scanned_cr": "2,415,500", "hist": "3",  "done": "Y", "gc": True},
-                    {"name": "Tussock Ignis - Emerald",     "scanned_cr": "1,849,000", "hist": "3",  "done": "Y", "gc": True},
+                    {"name": "Bacterium Aurasus - Teal",   "scanned_cr": "1,000,000", "hist": "4",  "done": "Y"},
+                    {"name": "Tubus Conifer - Teal",        "scanned_cr": "2,415,500", "hist": "3",  "done": "Y"},
+                    {"name": "Tussock Ignis - Emerald",     "scanned_cr": "1,849,000", "hist": "3",  "done": "Y"},
                 ],
             },
             {
@@ -45,9 +45,9 @@ SAMPLE_DATA = [
                 "remaining_cr": "0",
                 "scanned_cr":   "5,264,500",
                 "species": [
-                    {"name": "Bacterium Aurasus - Teal",   "scanned_cr": "1,000,000", "hist": "4",  "done": "Y", "gc": True},
-                    {"name": "Tubus Conifer - Teal",        "scanned_cr": "2,415,500", "hist": "3",  "done": "Y", "gc": True},
-                    {"name": "Tussock Ignis - Emerald",     "scanned_cr": "1,849,000", "hist": "3",  "done": "Y", "gc": True},
+                    {"name": "Bacterium Aurasus - Teal",   "scanned_cr": "1,000,000", "hist": "4",  "done": "Y"},
+                    {"name": "Tubus Conifer - Teal",        "scanned_cr": "2,415,500", "hist": "3",  "done": "Y"},
+                    {"name": "Tussock Ignis - Emerald",     "scanned_cr": "1,849,000", "hist": "3",  "done": "Y"},
                 ],
             },
             {
@@ -55,8 +55,8 @@ SAMPLE_DATA = [
                 "remaining_cr": "",
                 "scanned_cr":   "",
                 "species": [
-                    {"name": "UNIDENTIFIED (needs DSS scan)", "remaining_cr": "?", "scanned_cr": "", "hist": "", "done": "", "gc": False},
-                    {"name": "UNIDENTIFIED (needs DSS scan)", "remaining_cr": "?", "scanned_cr": "", "hist": "", "done": "", "gc": False},
+                    {"name": "UNIDENTIFIED (needs DSS scan)", "remaining_cr": "?", "scanned_cr": "", "hist": "", "done": ""},
+                    {"name": "UNIDENTIFIED (needs DSS scan)", "remaining_cr": "?", "scanned_cr": "", "hist": "", "done": ""},
                 ],
             },
         ],
@@ -72,8 +72,8 @@ SAMPLE_DATA = [
                 "scanned_cr":   "1,849,000",
                 "ff":           True,
                 "species": [
-                    {"name": "Tussock Pennula - Lime",   "remaining_cr": "",          "scanned_cr": "1,849,000", "hist": "3", "done": "Y", "gc": False},
-                    {"name": "Tussock Propagito - Lime", "remaining_cr": "1,849,000", "scanned_cr": "",          "hist": "2", "done": "",  "gc": False},
+                    {"name": "Tussock Pennula - Lime",   "remaining_cr": "",          "scanned_cr": "1,849,000", "hist": "3", "done": "Y"},
+                    {"name": "Tussock Propagito - Lime", "remaining_cr": "1,849,000", "scanned_cr": "",          "hist": "2", "done": ""},
                 ],
             },
         ],
@@ -103,7 +103,6 @@ class BioScanTable(tk.Frame):
         ("scanned_cr",   "SCANNED CR",   115, "center"),
         ("hist",         "HIST",          50, "center"),
         ("done",         "DONE",          50, "center"),
-        ("gc",           "GC",            40, "center"),
     )
 
     def __init__(self, parent, data: list | None = None, **kwargs):
@@ -221,7 +220,7 @@ class BioScanTable(tk.Frame):
                     "",
                     system.get("remaining_cr", ""),
                     system.get("scanned_cr", ""),
-                    "", "", "",
+                    "", "",
                 ),
                 tags=("system_row",),
                 open=sys_key not in self._collapsed,
@@ -245,7 +244,7 @@ class BioScanTable(tk.Frame):
                         "",
                         body.get("remaining_cr", ""),
                         body.get("scanned_cr", ""),
-                        "", "", "",
+                        "", "",
                     ),
                     tags=("parent",),
                     open=body_key not in self._collapsed,
@@ -263,8 +262,6 @@ class BioScanTable(tk.Frame):
                         or sp.get("placeholder", False)
                     )
                     tag = "unidentified" if unidentified else "child"
-                    gc_symbol = "⬛" if sp.get("gc") else ""
-
                     sp_id = self.tree.insert(
                         body_id, "end",
                         text="",
@@ -274,7 +271,6 @@ class BioScanTable(tk.Frame):
                             sp.get("scanned_cr", ""),
                             sp.get("hist", ""),
                             sp.get("done", ""),
-                            gc_symbol,
                         ),
                         tags=(tag,),
                     )
