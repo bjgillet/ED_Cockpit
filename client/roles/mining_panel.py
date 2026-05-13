@@ -9,10 +9,20 @@ Displays live mining data received from the agent:
   • Live cargo fill bar updated from Status.json
   • Drone launch counter (Collection / Prospector)
   • Cracked asteroid counter (AsteroidCracked)
+
+Commodity naming
+----------------
+The panel uses the same internal-name convention as the agent:
+  • self._cargo       — dict[internal_name, int]  (tally in tonnes)
+  • self._name_map    — dict[internal_name, localized_name]  (for display)
+  • self._prices      — dict[internal_name, {avg_sell, max_sell}]
+                        keyed exactly as the Ardent API returns them.
+
+All price lookups are a direct self._prices.get(internal_name) access —
+no normalisation, no case folding.
 """
 from __future__ import annotations
 
-import re
 import tkinter as tk
 from tkinter import ttk
 
@@ -41,43 +51,11 @@ _CONTENT_COLORS = {
 
 _BAR_W = 160
 
-_RE_NORM = re.compile(r'[\s_\-]+')
-
-
-def _norm_name(s: str) -> str:
-    """Normalise a commodity name for fuzzy lookup.
-
-    Strips spaces, underscores and hyphens then lowercases so that
-    "Methane Clathrate" and "methaneclathrate" resolve to the same key.
-    """
-    return _RE_NORM.sub("", s).lower()
-
 
 class MiningPanel(BasePanel):
     """Live mining panel: asteroid composition + refined ore tally."""
     _debug = False
     role_name = Role.MINING
-
-    # ── Price lookup helpers ────────────────────────────────────────────────
-
-    def _apply_prices(self, prices: dict) -> None:
-        """Store prices and rebuild both lookup indexes."""
-        self._prices      = prices
-        self._prices_ci   = {k.lower(): v for k, v in prices.items()}
-        self._prices_norm = {_norm_name(k): v for k, v in prices.items()}
-
-    def _lookup_price(self, ore: str) -> int:
-        """Return avg_sell for *ore* using a two-tier case/normalisation fallback.
-
-        Tier 1: case-insensitive exact match  → handles "Bertrandite" vs "bertrandite".
-        Tier 2: normalised match (strip spaces/underscores, lowercase)
-                → handles "Methane Clathrate" vs "methaneclathrate".
-        Returns 0 when no price data is available.
-        """
-        entry = (self._prices_ci.get(ore.lower())
-                 or self._prices_norm.get(_norm_name(ore))
-                 or {})
-        return entry.get("avg_sell", 0)
 
     # ── UI construction ────────────────────────────────────────────────────
 
@@ -134,7 +112,6 @@ class MiningPanel(BasePanel):
         cargo_outer.pack(fill="x", padx=4, pady=(0, 4))
         cargo_outer.columnconfigure(1, weight=1)
 
-        # Live cargo fill bar (from Status.json)
         tk.Label(cargo_outer, text="Cargo:", bg=PANEL_BG, fg=ACCENT_FG,
                  font=FONT_BOLD, anchor="w"
                  ).grid(row=0, column=0, sticky="w", padx=8, pady=2)
@@ -153,18 +130,14 @@ class MiningPanel(BasePanel):
             cargo_outer, text="0 t / 0 t", bg=PANEL_BG, fg=TEXT_FG, font=FONT_PATH)
         self._lbl_cargo_live.grid(row=0, column=2, sticky="w", padx=4, pady=2)
 
-        # Ore breakdown sub-frame
         cargo = tk.Frame(cargo_outer, bg=PANEL_BG)
         cargo.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 0))
         cargo.columnconfigure(1, weight=1)
-
         self._cargo_frame = cargo
-        # Pool of reusable row widget tuples: (name_lbl, count_lbl, price_lbl,
-        # name_var, count_var, price_var).  Grown on demand; rows are shown /
-        # hidden with grid() / grid_remove() so they are never destroyed.
+        # Pool of reusable row widgets (no destroy/recreate → no flicker)
         self._cargo_rows_pool: list[tuple] = []
 
-        # Estimated cargo value row (shown when commodity prices are available)
+        # Estimated value row
         est_row = tk.Frame(cargo_outer, bg=PANEL_BG)
         est_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         tk.Label(est_row, text="Est. value:", bg=PANEL_BG, fg=ACCENT_FG,
@@ -213,7 +186,6 @@ class MiningPanel(BasePanel):
 
         row1 = tk.Frame(acts, bg=PANEL_BG)
         row1.pack(fill="x", padx=4, pady=(4, 2))
-
         tk.Button(row1, text="◀ Prev Firegroup",
                   command=lambda: self.send_action("key_press", "prev_firegroup"),
                   **_BTN).pack(side="left", padx=3)
@@ -223,7 +195,6 @@ class MiningPanel(BasePanel):
 
         row2 = tk.Frame(acts, bg=PANEL_BG)
         row2.pack(fill="x", padx=4, pady=(0, 2))
-
         tk.Button(row2, text="Deploy Hardpoints",
                   command=lambda: self.send_action("key_press", "deploy_hardpoints"),
                   **_BTN).pack(side="left", padx=3)
@@ -233,7 +204,6 @@ class MiningPanel(BasePanel):
 
         row3 = tk.Frame(acts, bg=PANEL_BG)
         row3.pack(fill="x", padx=4, pady=(0, 4))
-
         tk.Button(row3, text="Enter FSS",
                   command=lambda: self.send_action("key_press", "enter_fss"),
                   **_BTN).pack(side="left", padx=3)
@@ -241,17 +211,16 @@ class MiningPanel(BasePanel):
                   command=lambda: self.send_action("key_press", "boost"),
                   **_BTN).pack(side="left", padx=3)
 
-        # ── Internal counters ─────────────────────────────────────────────
+        # ── Internal state ────────────────────────────────────────────────
         self._n_cracked     = 0
         self._n_collectors  = 0
         self._n_prospectors = 0
-        self._cargo: dict[str, int] = {}
+        self._cargo: dict[str, int] = {}          # internal_name → tonnes
+        self._name_map: dict[str, str] = {}       # internal_name → localized_name
         self._cargo_used: float = 0.0
         self._cargo_capacity: float = 0.0
         self._available_limpets: int = 0
-        self._prices:      dict[str, dict] = {}  # raw prices as received
-        self._prices_ci:   dict[str, dict] = {}  # lowercase-keyed (tier-1 lookup)
-        self._prices_norm: dict[str, dict] = {}  # normalised-keyed (tier-2 lookup)
+        self._prices: dict[str, dict] = {}        # internal_name → {avg_sell, max_sell}
 
         self.after_idle(self._scroll.refresh_layout)
 
@@ -268,7 +237,7 @@ class MiningPanel(BasePanel):
         elif event == "MiningRefined":
             self._on_refined(data)
         elif event == "LaunchDrone":
-            print (f"From on_event : Drone launched: {data}") if self._debug else None
+            print(f"From on_event : Drone launched: {data}") if self._debug else None
             self._on_drone(data)
         elif event == "Status":
             self._on_status(data)
@@ -297,14 +266,19 @@ class MiningPanel(BasePanel):
             self._on_prospected(asteroid)
 
         counters = data.get("counters", {})
-        self._n_cracked = int(counters.get("cracked", 0))
-        self._n_collectors = int(counters.get("collectors", 0))
+        self._n_cracked     = int(counters.get("cracked",     0))
+        self._n_collectors  = int(counters.get("collectors",  0))
         self._n_prospectors = int(counters.get("prospectors", 0))
         self._lbl_cracked.config(text=str(self._n_cracked))
         self._lbl_collectors.config(text=str(self._n_collectors))
         self._lbl_prospectors.config(text=str(self._n_prospectors))
         self._available_limpets = int(counters.get("available_limpets", 0))
         self._lbl_limpets.config(text=str(self._available_limpets))
+
+        # Merge name_map first so _rebuild_cargo can resolve display names
+        name_map = data.get("name_map", {})
+        if isinstance(name_map, dict):
+            self._name_map.update(name_map)
 
         self._cargo = {
             str(k): int(v) for k, v in data.get("cargo_tally", {}).items()
@@ -315,7 +289,7 @@ class MiningPanel(BasePanel):
 
         prices = data.get("commodity_prices")
         if isinstance(prices, dict) and prices:
-            self._apply_prices(prices)
+            self._prices = prices
 
         status = data.get("status", {})
         if status:
@@ -324,46 +298,67 @@ class MiningPanel(BasePanel):
             self._update_cargo_gauge()
 
     def _on_prospected(self, data: dict) -> None:
-        content    = data.get("content", "")
-        motherlode = data.get("motherlode", "")
-        remaining  = data.get("remaining", 1.0)
+        content   = data.get("content", "")
+        remaining = data.get("remaining", 1.0)
 
         color = _CONTENT_COLORS.get(content, TEXT_FG)
         self._lbl_content.config(text=content or "—", fg=color)
-        self._lbl_motherlode.config(
-            text=motherlode if motherlode else "None",
-            fg=GREEN_FG if motherlode else TEXT_FG,
-        )
         self._lbl_remaining.config(text=f"{remaining:.0f}%")
+
+        # Populate "Motherlode:" label from the is_motherlode flag
+        materials = data.get("materials", [])
+        motherlode_name = next(
+            (m.get("localized_name", m.get("name", ""))
+             for m in materials if m.get("is_motherlode")),
+            "",
+        )
+        self._lbl_motherlode.config(
+            text=motherlode_name if motherlode_name else "None",
+            fg=GREEN_FG if motherlode_name else TEXT_FG,
+        )
+
+        # Update name_map from materials
+        for m in materials:
+            internal  = m.get("name", "")
+            localised = m.get("localized_name", internal)
+            if internal:
+                self._name_map[internal] = localised
 
         for w in self._mat_frame.winfo_children():
             w.destroy()
 
         self._mat_frame.columnconfigure(1, weight=0)
         self._mat_frame.columnconfigure(2, weight=1)
-        for i, m in enumerate(data.get("materials", [])):
-            name = m.get("name", "—")
-            pct  = m.get("proportion", 0.0)
-            fg   = GREEN_FG if pct >= 20 else (HEADER_FG if pct >= 10 else TEXT_FG)
-            tk.Label(self._mat_frame, text=f"  {name}",
+        for i, m in enumerate(materials):
+            localised  = m.get("localized_name", m.get("name", "—"))
+            pct        = m.get("proportion", 0.0)
+            is_ml      = m.get("is_motherlode", False)
+            # Price is already resolved by the agent — direct use
+            price      = int(m.get("price", 0))
+            # Colour: motherlode always green; else by proportion threshold
+            fg = GREEN_FG if is_ml or pct >= 20 else (HEADER_FG if pct >= 10 else TEXT_FG)
+            name_text  = f"  {localised}" + (" ★" if is_ml else "")
+            tk.Label(self._mat_frame, text=name_text,
                      bg=PANEL_BG, fg=fg, font=FONT_BODY,
                      anchor="w").grid(row=i, column=0, sticky="w", padx=8)
             tk.Label(self._mat_frame, text=f"{pct:.1f}%",
                      bg=PANEL_BG, fg=fg, font=FONT_BODY,
                      anchor="w").grid(row=i, column=1, sticky="w", padx=(0, 8))
-            avg_sell   = self._lookup_price(name)
-            price_text = f"~{avg_sell:,} Cr/t" if avg_sell else ""
+            price_text = f"~{price:,} Cr/t" if price else ""
             tk.Label(self._mat_frame, text=price_text,
                      bg=PANEL_BG, fg=ORANGE_FG, font=FONT_PATH,
                      anchor="w").grid(row=i, column=2, sticky="w")
 
     def _on_refined(self, data: dict) -> None:
-        ore = data.get("type", "Unknown")
-        self._cargo[ore] = self._cargo.get(ore, 0) + 1
-        self._rebuild_cargo()
+        internal  = data.get("type", "")
+        localised = data.get("type_localised", internal)
+        if internal:
+            self._name_map[internal] = localised
+            self._cargo[internal] = self._cargo.get(internal, 0) + 1
+            self._rebuild_cargo()
 
     def _on_drone(self, data: dict) -> None:
-        print (f"Drone launched: {data}") if self._debug else None
+        print(f"Drone launched: {data}") if self._debug else None
         drone_type = data.get("drone_type", "")
         if drone_type == "Collection":
             self._n_collectors += 1
@@ -388,11 +383,10 @@ class MiningPanel(BasePanel):
         self._available_limpets = int(data.get("available_limpets", self._available_limpets))
         self._lbl_limpets.config(text=str(self._available_limpets))
 
-        # Prices are piggybacked on the first Status tick after the agent's
-        # background Inara fetch completes (fixes the startup timing race).
+        # Prices piggybacked on the first Status tick after agent background fetch.
         prices = data.get("commodity_prices")
         if isinstance(prices, dict) and prices:
-            self._apply_prices(prices)
+            self._prices = prices
             self._rebuild_cargo()
 
         self._update_cargo_gauge()
@@ -409,22 +403,16 @@ class MiningPanel(BasePanel):
             self._cargo_used = float(cargo_val)
         self._available_limpets = int(data.get("available_limpets", self._available_limpets))
         self._lbl_limpets.config(text=str(self._available_limpets))
+        name_map = data.get("name_map", {})
+        if isinstance(name_map, dict):
+            self._name_map.update(name_map)
         tally = data.get("refined_cargo_tally")
         if isinstance(tally, dict):
-            cleaned: dict[str, int] = {}
-            for k, v in tally.items():
-                try:
-                    count = int(v)
-                except (TypeError, ValueError):
-                    continue
-                if count > 0:
-                    cleaned[str(k)] = count
-            self._cargo = cleaned
+            self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
             self._rebuild_cargo()
         self._update_cargo_gauge()
 
     def _on_docked(self, data: dict) -> None:
-        # Reset asteroid display — no longer relevant once docked.
         self._lbl_content.config(text="—", fg=TEXT_FG)
         self._lbl_motherlode.config(text="—", fg=TEXT_FG)
         self._lbl_remaining.config(text="—")
@@ -433,22 +421,20 @@ class MiningPanel(BasePanel):
         tk.Label(self._mat_frame, text="  No active asteroid", bg=PANEL_BG, fg=TEXT_FG,
                  font=FONT_PATH, anchor="w").grid(row=0, column=0, sticky="w", padx=8)
 
-        # Reset per-session counters.
-        self._n_cracked = 0
-        self._n_collectors = 0
+        self._n_cracked     = 0
+        self._n_collectors  = 0
         self._n_prospectors = 0
         self._lbl_cracked.config(text="0")
         self._lbl_collectors.config(text="0")
         self._lbl_prospectors.config(text="0")
 
-        # Refined-cargo tally and available limpets are preserved on docking.
-        # The agent sends back the current tally; apply it so the display
-        # stays consistent with the authoritative agent state.
+        name_map = data.get("name_map", {})
+        if isinstance(name_map, dict):
+            self._name_map.update(name_map)
         tally = data.get("refined_cargo_tally")
         if isinstance(tally, dict):
             self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
             self._rebuild_cargo()
-
         limpets = data.get("available_limpets")
         if limpets is not None:
             self._available_limpets = int(limpets)
@@ -457,9 +443,11 @@ class MiningPanel(BasePanel):
         self.after_idle(self._scroll.refresh_layout)
 
     def _on_cargo_transfer(self, data: dict) -> None:
-        """Fleet carrier ↔ ship transfer: apply updated tally and limpet count."""
         self._available_limpets = int(data.get("available_limpets", self._available_limpets))
         self._lbl_limpets.config(text=str(self._available_limpets))
+        name_map = data.get("name_map", {})
+        if isinstance(name_map, dict):
+            self._name_map.update(name_map)
         tally = data.get("refined_cargo_tally")
         if isinstance(tally, dict):
             self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
@@ -485,6 +473,9 @@ class MiningPanel(BasePanel):
     def _on_eject_cargo(self, data: dict) -> None:
         self._available_limpets = int(data.get("available_limpets", self._available_limpets))
         self._lbl_limpets.config(text=str(self._available_limpets))
+        name_map = data.get("name_map", {})
+        if isinstance(name_map, dict):
+            self._name_map.update(name_map)
         tally = data.get("refined_cargo_tally")
         if isinstance(tally, dict):
             self._cargo = {str(k): int(v) for k, v in tally.items() if int(v) > 0}
@@ -496,7 +487,7 @@ class MiningPanel(BasePanel):
 
     def _update_cargo_gauge(self) -> None:
         capacity = max(self._cargo_capacity, 0.0)
-        used = max(self._cargo_used, 0.0)
+        used     = max(self._cargo_used,     0.0)
         self._cargo_bar.configure(maximum=capacity if capacity > 0 else 1.0)
         self._cargo_var.set(min(used, capacity) if capacity > 0 else 0.0)
         self._lbl_cargo_live.config(text=f"{used:.0f} t / {capacity:.0f} t")
@@ -515,16 +506,18 @@ class MiningPanel(BasePanel):
 
         total_est  = 0
         has_prices = bool(self._prices)
-        items      = sorted(self._cargo.items())
+        # Sort by display name for a stable, readable order
+        items = sorted(self._cargo.items(),
+                       key=lambda kv: self._name_map.get(kv[0], kv[0]).lower())
 
         # Grow the pool when new ore types appear.
         while len(self._cargo_rows_pool) < len(items):
-            row = len(self._cargo_rows_pool)
+            row       = len(self._cargo_rows_pool)
             name_var  = tk.StringVar()
             count_var = tk.StringVar()
             price_var = tk.StringVar()
-            name_lbl = tk.Label(self._cargo_frame, textvariable=name_var,
-                                bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY, anchor="w")
+            name_lbl  = tk.Label(self._cargo_frame, textvariable=name_var,
+                                 bg=PANEL_BG, fg=TEXT_FG, font=FONT_BODY, anchor="w")
             count_lbl = tk.Label(self._cargo_frame, textvariable=count_var,
                                  bg=PANEL_BG, fg=ACCENT_FG, font=FONT_BOLD)
             price_lbl = tk.Label(self._cargo_frame, textvariable=price_var,
@@ -537,13 +530,15 @@ class MiningPanel(BasePanel):
             )
 
         # Update visible rows in-place (no widget destruction → no flicker).
-        for i, (ore, count) in enumerate(items):
+        for i, (internal, count) in enumerate(items):
             name_lbl, count_lbl, price_lbl, name_var, count_var, price_var = \
                 self._cargo_rows_pool[i]
-            name_var.set(f"  {ore}")
+            display = self._name_map.get(internal, internal)
+            name_var.set(f"  {display}")
             count_var.set(f"{count} t")
             if has_prices:
-                avg_sell = self._lookup_price(ore)
+                # Direct lookup by internal name — no normalisation needed
+                avg_sell  = self._prices.get(internal, {}).get("avg_sell", 0)
                 total_est += count * avg_sell
                 price_var.set(f"~{avg_sell:,} Cr/t" if avg_sell else "")
             else:
@@ -585,25 +580,16 @@ class MiningPanel(BasePanel):
             pass
         style.configure(
             "MiningGreen.Horizontal.TProgressbar",
-            troughcolor="#222244",
-            background=GREEN_FG,
-            bordercolor="#222244",
-            lightcolor=GREEN_FG,
-            darkcolor=GREEN_FG,
+            troughcolor="#222244", background=GREEN_FG,
+            bordercolor="#222244", lightcolor=GREEN_FG, darkcolor=GREEN_FG,
         )
         style.configure(
             "MiningYellow.Horizontal.TProgressbar",
-            troughcolor="#222244",
-            background=HEADER_FG,
-            bordercolor="#222244",
-            lightcolor=HEADER_FG,
-            darkcolor=HEADER_FG,
+            troughcolor="#222244", background=HEADER_FG,
+            bordercolor="#222244", lightcolor=HEADER_FG, darkcolor=HEADER_FG,
         )
         style.configure(
             "MiningRed.Horizontal.TProgressbar",
-            troughcolor="#222244",
-            background=RED_FG,
-            bordercolor="#222244",
-            lightcolor=RED_FG,
-            darkcolor=RED_FG,
+            troughcolor="#222244", background=RED_FG,
+            bordercolor="#222244", lightcolor=RED_FG, darkcolor=RED_FG,
         )

@@ -3,45 +3,64 @@ ED Cockpit — Mining Role
 =========================
 Filters Elite Dangerous journal events relevant to mining activities.
 
+Commodity naming convention
+----------------------------
+All internal state and wire payloads use the **internal** commodity name
+(lowercase, no spaces) that the ED journal stores in ``Name`` / ``Type``
+fields (e.g. ``"lowtemperaturediamond"``, ``"opal"``).
+
+A parallel ``_name_map`` dict maps each internal name to its localised
+display name (e.g. ``"lowtemperaturediamond" → "Low Temperature Diamonds"``).
+Display names come from the journal's ``Name_Localised`` / ``Type_Localised``
+fields and are therefore correct for the player's game language automatically.
+
+The Ardent price cache is also keyed by internal name, so commodity price
+lookups are a direct dict access with no normalisation required.
+
 Context File
 ------------
-  Configuration file so mining session state survives agent restart
-  File located at <config_dir>/mining.json 
+  Configuration file so mining session state survives agent restart.
+  File located at <config_dir>/mining_state.json
 
     State file format:
     {
-      "ship":{
-        "name": <ship name>,
-        "cargo_capacity": <float t>,
-        "cargo_used": <float t>,
-        "cargo": [
-          {"item name":<string>, "item_quantity":int}
+      "asteroid": {
+        "materials": [
+          {
+            "name":          "<internal>",
+            "localized_name": "<display>",
+            "proportion":    <float 0-100>,
+            "is_motherlode": <bool>,
+            "price":         <int avg_sell cr>
+          },
           ...
-          ]
-        },
-        "limpets": {
-            "collection": <int>,
-            "prospector": <int>,
-            "remaining": <int>,
-        },
-        "asteroid": {
-            "materials": [
-                {"name": <string>, "proportion": <int 0-100>},
-                ...
-            ],
-            "remaining": <float 0-1>,
-        },
-      "last_updated": <ISO 8601 timestamp>
+        ],
+        "content":   "<Low|Medium|High>",
+        "remaining": <float 0-100>
+      },
+      "cargo_tally":     {"<internal>": <int t>, ...},
+      "tracked_refined": ["<internal>", ...],
+      "name_map":        {"<internal>": "<display>", ...},
+      "counters": {
+        "cracked":          <int>,
+        "collectors":       <int>,
+        "prospectors":      <int>,
+        "available_limpets": <int>
+      },
+      "status":         {"cargo": <float t>, "cargo_scoop": <bool>},
+      "cargo_capacity": <float t>,
+      "last_updated":   "<ISO 8601 timestamp>"
     }
+
 Events handled
 --------------
   ProspectedAsteroid — asteroid prospected; reports material composition
                         and the motherlode type if any.
   AsteroidCracked    — asteroid cracked open (for core mining).
   MiningRefined      — one unit of ore refined from the collector limpet
-                        hopper into cargo.
+                       hopper into cargo.
   LaunchDrone        — drone (limpet) launched; we forward only
-                        Collector and Prospector subtypes.
+                       Collector and Prospector subtypes.
   Cargo              — full cargo inventory snapshot; used to reconcile
                        refined-material counts and remaining limpets.
   Loadout            — ship loadout snapshot; used to capture cargo capacity.
@@ -49,65 +68,75 @@ Events handled
                        tally and available limpets are preserved and stay in sync
                        via subsequent Cargo / CargoTransfer events.
   CargoTransfer      — cargo moved between ship and fleet carrier (or vice-versa).
-                       Updates refined tally and limpets immediately so the panel
-                       stays correct even when a Cargo snapshot does not follow.
   BuyDrones          — limpets purchased; increases available limpets.
   SellDrones         — limpets sold; decreases available limpets.
-  EjectCargo         — item(s) ejected from cargo.  If ``Type`` contains
-                       "drone", ``Count`` limpets are removed from the
-                       available count.  Otherwise the commodity is removed
-                       from the refined-cargo tally by ``Count`` units.
+  EjectCargo         — item(s) ejected from cargo.
 
 Wire payload shapes
 -------------------
   ProspectedAsteroid →
     {
-      "event":       "ProspectedAsteroid",
-      "materials":   [{"name": "<loc>", "proportion": <float 0-1>}, ...],
-      "content":     "Low" | "Medium" | "High",
-      "motherlode":  "<type_localised>" | "",   # empty if not a motherlode
-      "remaining":   <float>,  # fraction remaining (1.0 = untouched)
+      "event":     "ProspectedAsteroid",
+      "materials": [
+        {
+          "name":          "<internal>",   # e.g. "lowtemperaturediamond"
+          "localized_name": "<display>",   # e.g. "Low Temperature Diamonds"
+          "proportion":    <float 0-100>,  # percentage of asteroid composition
+          "is_motherlode": <bool>,
+          "price":         <int>,          # avg sell Cr/t from Inara (0 = unknown)
+        },
+        ...
+      ],
+      "content":   "Low" | "Medium" | "High",
+      "remaining": <float>,  # fraction remaining (1.0 = untouched)
     }
 
   AsteroidCracked →
     {
-      "event":      "AsteroidCracked",
-      "body":       "<asteroid designation>",
+      "event": "AsteroidCracked",
+      "body":  "<asteroid designation>",
     }
 
   MiningRefined →
     {
-      "event": "MiningRefined",
-      "type":  "<commodity_localised>",   # e.g. "Painite"
+      "event":          "MiningRefined",
+      "type":           "<internal>",   # e.g. "lowtemperaturediamond"
+      "type_localised": "<display>",    # e.g. "Low Temperature Diamonds"
     }
 
   LaunchDrone (collection / prospector only) →
     {
-      "event":      "LaunchDrone",
-      "drone_type": "Collection" | "Prospector",
+      "event":             "LaunchDrone",
+      "drone_type":        "Collection" | "Prospector",
+      "available_limpets": <int>,
     }
 
-  CargoTransfer →
+  CargoTransfer | CarrierDepositFuel | EjectCargo →
     {
-      "event":               "CargoTransfer",
-      "refined_cargo_tally": {<ore>: <int t>, ...},
+      "event":               "CargoTransfer" | "CarrierDepositFuel" | "EjectCargo",
+      "refined_cargo_tally": {"<internal>": <int t>, ...},
       "available_limpets":   <int>,
-    }
-
-  EjectCargo →
-    {
-      "event":               "EjectCargo",
-      "refined_cargo_tally": {<ore>: <int t>, ...},
-      "available_limpets":   <int>,
+      "name_map":            {"<internal>": "<display>", ...},
+      # EjectCargo also carries:
       "cargo":               <float t>,   # updated cargo used after ejection
+    }
+
+  Docked →
+    {
+      "event":               "Docked",
+      "station":             "<name>",
+      "system":              "<system>",
+      "refined_cargo_tally": {"<internal>": <int t>, ...},
+      "available_limpets":   <int>,
+      "name_map":            {"<internal>": "<display>", ...},
     }
 
 Status payload (filter_status) →
     {
-      "cargo":          <float t>,
-      "cargo_capacity": <float t>,
+      "cargo":             <float t>,
+      "cargo_capacity":    <float t>,
       "available_limpets": <int>,
-      "cargo_scoop":    <bool>,
+      "cargo_scoop":       <bool>,
     }
 """
 from __future__ import annotations
@@ -152,20 +181,21 @@ class MiningRole(BaseRole):
         self._config_dir = self._resolve_config_dir()
         self._state_path = self._config_dir / "mining_state.json"
 
+        # Last prospected asteroid.  Materials list items:
+        #   {name, localized_name, proportion, is_motherlode, price}
         self._last_asteroid: dict = {
             "materials": [],
-            "content": "",
-            "motherlode": "",
+            "content":   "",
             "remaining": 1.0,
         }
+
+        # Cargo tally keyed by INTERNAL name (e.g. "lowtemperaturediamond" → 5)
         self._cargo_tally: dict[str, int] = {}
+        # Set of internal names of materials ever seen in MiningRefined events
         self._tracked_refined: set[str] = set()
-        # Maps internal lowercase name → display name for all refined materials
-        # ever seen.  Populated from MiningRefined (Type/Type_Localised) and
-        # Cargo (Name/Name_Localised) so we can resolve e.g.
-        # "lowtemperaturediamond" → "Low Temperature Diamonds" even when
-        # CargoTransfer or Cargo events omit the localised field.
+        # internal name → localised display name (built from journal events)
         self._name_map: dict[str, str] = {}
+
         self._n_cracked: int = 0
         self._n_collectors: int = 0
         self._n_prospectors: int = 0
@@ -174,11 +204,9 @@ class MiningRole(BaseRole):
         self._last_status: dict = {"cargo": 0.0, "cargo_scoop": False}
 
         # Commodity prices fetched from Inara in a background thread.
+        # Keyed by internal name (e.g. "lowtemperaturediamond").
         self._prices: dict[str, dict] = {}
         self._prices_lock = threading.Lock()
-        # Set to True once prices are loaded so filter_status() can push them
-        # to already-connected clients on the next Status tick (fixes the race
-        # where get_snapshot() runs before the background thread finishes).
         self._prices_pending_push: bool = False
         threading.Thread(
             target=self._fetch_prices_bg,
@@ -197,9 +225,6 @@ class MiningRole(BaseRole):
             with self._prices_lock:
                 self._prices = prices
                 if prices:
-                    # Signal filter_status() to piggyback prices on the next
-                    # Status tick so already-connected clients get them even
-                    # when get_snapshot() ran before this thread finished.
                     self._prices_pending_push = True
         except Exception as exc:
             log.warning("MiningRole: could not fetch commodity prices: %s", exc)
@@ -213,9 +238,6 @@ class MiningRole(BaseRole):
     def sync_from_journal_memory(self, snapshot: dict) -> None:
         """
         Seed cargo capacity/usage from EDApp journal memory bootstrap.
-
-        This helps initialise the gauge correctly even when the current
-        runtime has not yet emitted fresh Loadout/Cargo journal events.
         """
         changed = False
         ship = snapshot.get("ship", {}) if isinstance(snapshot, dict) else {}
@@ -241,9 +263,11 @@ class MiningRole(BaseRole):
                     continue
                 count = max(count, 0)
                 used += count
-                name = item.get("Name_Localised") or item.get("Name", "")
-                if name:
-                    inv_map[str(name)] = count
+                internal  = str(item.get("Name", "")).strip().lower()
+                localised = item.get("Name_Localised") or internal
+                if internal:
+                    inv_map[internal] = count
+                    self._name_map[internal] = localised
             used_f = float(used)
             if used_f != float(self._last_status.get("cargo", 0.0)):
                 self._last_status["cargo"] = used_f
@@ -263,36 +287,57 @@ class MiningRole(BaseRole):
             log.debug("MiningRole: no persisted state loaded: %s", exc)
             return
 
-        asteroid = saved.get("asteroid", {})
+        # ── asteroid ──────────────────────────────────────────────────────
+        asteroid_raw = saved.get("asteroid", {})
+        materials = []
+        for m in asteroid_raw.get("materials", []):
+            if not isinstance(m, dict):
+                continue
+            # New format has "localized_name"; old format only had "name" (display).
+            materials.append({
+                "name":          str(m.get("name", "")),
+                "localized_name": str(m.get("localized_name", m.get("name", ""))),
+                "proportion":    float(m.get("proportion", 0.0)),
+                "is_motherlode": bool(m.get("is_motherlode", False)),
+                "price":         int(m.get("price", 0)),
+            })
+        # Migrate old "motherlode" string field → mark matching material
+        old_motherlode = str(asteroid_raw.get("motherlode", ""))
+        if old_motherlode and not any(m["is_motherlode"] for m in materials):
+            for m in materials:
+                if m["localized_name"] == old_motherlode or m["name"] == old_motherlode:
+                    m["is_motherlode"] = True
+                    break
         self._last_asteroid = {
-            "materials": list(asteroid.get("materials", [])),
-            "content": str(asteroid.get("content", "")),
-            "motherlode": str(asteroid.get("motherlode", "")),
-            "remaining": float(asteroid.get("remaining", 1.0)),
+            "materials": materials,
+            "content":   str(asteroid_raw.get("content", "")),
+            "remaining": float(asteroid_raw.get("remaining", 1.0)),
         }
+
+        # ── cargo tally (internal-name keys) ──────────────────────────────
         self._cargo_tally = {
             str(k): int(v) for k, v in saved.get("cargo_tally", {}).items()
         }
         tracked = saved.get("tracked_refined", [])
         if isinstance(tracked, list):
-            self._tracked_refined = {str(name) for name in tracked if str(name)}
+            self._tracked_refined = {str(n) for n in tracked if n}
         name_map_raw = saved.get("name_map", {})
         if isinstance(name_map_raw, dict):
             self._name_map = {str(k): str(v) for k, v in name_map_raw.items()}
 
+        # ── counters ──────────────────────────────────────────────────────
         counters = saved.get("counters", {})
         if not isinstance(counters, dict):
             counters = {}
-        self._n_cracked = self._to_int(counters.get("cracked"), default=0)
-        self._n_collectors = self._to_int(counters.get("collectors"), default=0)
+        self._n_cracked     = self._to_int(counters.get("cracked"),     default=0)
+        self._n_collectors  = self._to_int(counters.get("collectors"),  default=0)
         self._n_prospectors = self._to_int(counters.get("prospectors"), default=0)
-        # Backward compatibility: support old typo key "avaiable_limpets".
         raw_limpets = counters.get("available_limpets", counters.get("avaiable_limpets"))
         self._available_limpets = self._to_int(raw_limpets, default=0)
 
         status = saved.get("status", {})
         self._last_status = {
-            "cargo": float(status.get("cargo", 0.0)),
+            "cargo":       float(status.get("cargo", 0.0)),
             "cargo_scoop": bool(status.get("cargo_scoop", False)),
         }
         self._cargo_capacity = float(saved.get("cargo_capacity", 0.0))
@@ -303,19 +348,19 @@ class MiningRole(BaseRole):
         try:
             self._config_dir.mkdir(parents=True, exist_ok=True)
             state = {
-                "asteroid": dict(self._last_asteroid),
-                "cargo_tally": dict(self._cargo_tally),
+                "asteroid":       dict(self._last_asteroid),
+                "cargo_tally":    dict(self._cargo_tally),
                 "tracked_refined": sorted(self._tracked_refined),
-                "name_map": dict(self._name_map),
+                "name_map":       dict(self._name_map),
                 "counters": {
-                    "cracked": self._n_cracked,
-                    "collectors": self._n_collectors,
-                    "prospectors": self._n_prospectors,
+                    "cracked":           self._n_cracked,
+                    "collectors":        self._n_collectors,
+                    "prospectors":       self._n_prospectors,
                     "available_limpets": self._available_limpets,
                 },
-                "status": dict(self._last_status),
+                "status":         dict(self._last_status),
                 "cargo_capacity": self._cargo_capacity,
-                "last_updated": datetime.now(timezone.utc).isoformat(),
+                "last_updated":   datetime.now(timezone.utc).isoformat(),
             }
             self._state_path.write_text(
                 json.dumps(state, indent=2, ensure_ascii=False),
@@ -333,7 +378,6 @@ class MiningRole(BaseRole):
             self._available_limpets > 0,
             bool(self._last_asteroid.get("materials")),
             bool(self._last_asteroid.get("content")),
-            bool(self._last_asteroid.get("motherlode")),
             float(self._last_status.get("cargo", 0.0)) > 0.0,
             self._cargo_capacity > 0.0,
             bool(self._last_status.get("cargo_scoop", False)),
@@ -343,16 +387,17 @@ class MiningRole(BaseRole):
         with self._prices_lock:
             prices = dict(self._prices)
         return {
-            "asteroid": dict(self._last_asteroid),
-            "cargo_tally": dict(self._cargo_tally),
+            "asteroid":        dict(self._last_asteroid),
+            "cargo_tally":     dict(self._cargo_tally),
+            "name_map":        dict(self._name_map),
             "counters": {
-                "cracked": self._n_cracked,
-                "collectors": self._n_collectors,
-                "prospectors": self._n_prospectors,
+                "cracked":           self._n_cracked,
+                "collectors":        self._n_collectors,
+                "prospectors":       self._n_prospectors,
                 "available_limpets": self._available_limpets,
             },
-            "status": dict(self._last_status),
-            "cargo_capacity": self._cargo_capacity,
+            "status":          dict(self._last_status),
+            "cargo_capacity":  self._cargo_capacity,
             "commodity_prices": prices,
         }
 
@@ -391,19 +436,16 @@ class MiningRole(BaseRole):
             else float(self._last_status.get("cargo", 0.0))
         )
         payload = {
-            "cargo":       cargo_value,
-            "cargo_capacity": self._cargo_capacity,
+            "cargo":             cargo_value,
+            "cargo_capacity":    self._cargo_capacity,
             "available_limpets": self._available_limpets,
-            "cargo_scoop": bool(flags & _FLAG_CARGO_SCOOP),
+            "cargo_scoop":       bool(flags & _FLAG_CARGO_SCOOP),
         }
         changed = payload != self._last_status
         self._last_status = payload
         if changed:
             self._save_state()
 
-        # If the background price-fetch finished after the last get_snapshot()
-        # call, piggyback the prices on this Status tick so connected clients
-        # receive them without needing to reconnect.
         with self._prices_lock:
             if self._prices_pending_push and self._prices:
                 payload["commodity_prices"] = dict(self._prices)
@@ -412,22 +454,61 @@ class MiningRole(BaseRole):
         return payload
 
     # ── Event handlers ─────────────────────────────────────────────────────
+
     def _handle_prospected(self, data: dict) -> dict:
-        materials = []
+        with self._prices_lock:
+            prices = dict(self._prices)
+
+        materials: list[dict] = []
+
         for m in data.get("Materials", []):
+            internal  = str(m.get("Name", "")).strip().lower()
+            localised = m.get("Name_Localised") or internal
+            proportion = float(m.get("Proportion", 0.0))
+            price = prices.get(internal, {}).get("avg_sell", 0)
+            if internal:
+                self._name_map[internal] = localised
             materials.append({
-                "name":       m.get("Name_Localised") or m.get("Name", ""),
-                "proportion": float(m.get("Proportion", 0.0)),
+                "name":          internal,
+                "localized_name": localised,
+                "proportion":    proportion,
+                "is_motherlode": False,
+                "price":         price,
             })
+
+        # Mark the motherlode material in-place (it is already in Materials[])
+        ml_internal  = str(data.get("MotherlodeType", "")).strip().lower()
+        ml_localised = data.get("MotherlodeType_Localised") or ml_internal
+        if ml_internal:
+            self._name_map[ml_internal] = ml_localised
+            matched = False
+            for m in materials:
+                if m["name"] == ml_internal:
+                    m["is_motherlode"] = True
+                    matched = True
+                    break
+            if not matched:
+                # Rare: motherlode not listed in Materials — append it
+                materials.append({
+                    "name":          ml_internal,
+                    "localized_name": ml_localised,
+                    "proportion":    0.0,
+                    "is_motherlode": True,
+                    "price":         prices.get(ml_internal, {}).get("avg_sell", 0),
+                })
+
+        content = data.get("Content_Localised") or data.get("Content", "")
         payload = {
-            "event":      "ProspectedAsteroid",
-            "materials":  materials,
-            "content":    data.get("Content", ""),
-            "motherlode": (data.get("MotherlodeType_Localised")
-                           or data.get("MotherlodeType", "")),
-            "remaining":  float(data.get("Remaining", 1.0)),
+            "event":     "ProspectedAsteroid",
+            "materials": materials,
+            "content":   content,
+            "remaining": float(data.get("Remaining", 1.0)),
         }
-        self._last_asteroid = dict(payload)
+        self._last_asteroid = {
+            "materials": materials,
+            "content":   content,
+            "remaining": payload["remaining"],
+        }
         self._save_state()
         return payload
 
@@ -441,19 +522,19 @@ class MiningRole(BaseRole):
         return payload
 
     def _handle_refined(self, data: dict) -> dict:
-        ore = data.get("Type_Localised") or data.get("Type", "")
-        # The journal Type field may use a localisation-key wrapper such as
-        # "$lowtemperaturediamond_name;" — normalise it to the plain internal
-        # name ("lowtemperaturediamond") so it matches what CargoTransfer sends.
-        internal = self._strip_journal_key(data.get("Type", "") or "")
-        if ore:
-            self._tracked_refined.add(ore)
-            self._cargo_tally[ore] = self._cargo_tally.get(ore, 0) + 1
-            if internal:
-                self._name_map[internal] = ore
+        # Type field may be "$lowtemperaturediamond_name;" — strip to internal name.
+        internal  = self._strip_journal_key(data.get("Type", "") or "")
+        localised = (data.get("Type_Localised")
+                     or self._name_map.get(internal)
+                     or internal)
+        if internal:
+            self._tracked_refined.add(internal)
+            self._cargo_tally[internal] = self._cargo_tally.get(internal, 0) + 1
+            self._name_map[internal]    = localised
         payload = {
-            "event": "MiningRefined",
-            "type":  ore,
+            "event":          "MiningRefined",
+            "type":           internal,
+            "type_localised": localised,
         }
         self._save_state()
         return payload
@@ -471,8 +552,8 @@ class MiningRole(BaseRole):
             if self._available_limpets > 0:
                 self._available_limpets -= 1
         payload = {
-            "event":      "LaunchDrone",
-            "drone_type": drone_type,
+            "event":             "LaunchDrone",
+            "drone_type":        drone_type,
             "available_limpets": self._available_limpets,
         }
         self._save_state()
@@ -482,24 +563,25 @@ class MiningRole(BaseRole):
         self._cargo_capacity = float(data.get("CargoCapacity", 0.0))
         self._save_state()
         return {
-            "event": "Loadout",
-            "ship": data.get("Ship", ""),
-            "ship_name": data.get("ShipName", ""),
+            "event":          "Loadout",
+            "ship":           data.get("Ship", ""),
+            "ship_name":      data.get("ShipName", ""),
             "cargo_capacity": self._cargo_capacity,
-            "hull_health": float(data.get("HullHealth", 0.0)),
-            "fuel_capacity": data.get("FuelCapacity", {}),
+            "hull_health":    float(data.get("HullHealth", 0.0)),
+            "fuel_capacity":  data.get("FuelCapacity", {}),
         }
 
     def _handle_cargo(self, data: dict) -> dict | None:
-        # Ignore non-ship cargo events (e.g. SRV).
         vessel = str(data.get("Vessel", "Ship"))
         if vessel.lower() not in ("ship", ""):
             return None
 
         inventory = data.get("Inventory")
+        # inv_map keyed by internal name (plain lowercase, no $ wrapper in Cargo events)
         inv_map: dict[str, int] = {}
         used = float(self._last_status.get("cargo", 0.0))
         have_inventory = isinstance(inventory, list)
+
         if have_inventory:
             used = 0.0
             for item in inventory:
@@ -511,9 +593,11 @@ class MiningRole(BaseRole):
                     continue
                 count = max(count, 0)
                 used += count
-                name = item.get("Name_Localised") or item.get("Name", "")
-                if name:
-                    inv_map[str(name)] = count
+                internal  = str(item.get("Name", "")).strip().lower()
+                localised = item.get("Name_Localised") or internal
+                if internal:
+                    inv_map[internal] = count
+                    self._name_map[internal] = localised
         elif "Count" in data:
             try:
                 used = float(data.get("Count", used))
@@ -521,55 +605,30 @@ class MiningRole(BaseRole):
                 pass
         self._last_status["cargo"] = float(used)
 
-        # Keep refined tally aligned with real cargo inventory.
-        # Build the name map from any items that carry both Name and
-        # Name_Localised, so future lookups by internal name work correctly
-        # (e.g. "lowtemperaturediamond" → "Low Temperature Diamonds").
         if have_inventory:
-            for item in inventory:
-                if not isinstance(item, dict):
-                    continue
-                display  = (item.get("Name_Localised") or "").strip()
-                internal = self._strip_journal_key(item.get("Name") or "")
-                if display and internal:
-                    self._name_map[internal] = display
-
-            # Reconcile: for each tracked refined material check whether it
-            # is still in the ship's cargo.  Use _resolve_display to handle
-            # entries whose Name_Localised was absent (internal name only).
-            inv_map_ci = {k.lower(): v for k, v in inv_map.items()}
-            for name in list(self._tracked_refined):
-                current = self._lookup_in_inv(name, inv_map_ci)
+            # Reconcile tally: keep only what is actually in the ship hold.
+            for internal in list(self._tracked_refined):
+                current = inv_map.get(internal, 0)
                 if current <= 0:
-                    self._cargo_tally.pop(name, None)
+                    self._cargo_tally.pop(internal, None)
                 else:
-                    self._cargo_tally[name] = current
+                    self._cargo_tally[internal] = current
 
             limpet_count = self._extract_limpets(inv_map)
             if limpet_count is not None:
                 self._available_limpets = limpet_count
+
         self._save_state()
         return {
-            "event": "Cargo",
-            "cargo": float(used),
-            "available_limpets": self._available_limpets,
+            "event":               "Cargo",
+            "cargo":               float(used),
+            "available_limpets":   self._available_limpets,
             "refined_cargo_tally": dict(self._cargo_tally),
-            "inventory": inventory if have_inventory else [],
+            "name_map":            dict(self._name_map),
+            "inventory":           inventory if have_inventory else [],
         }
 
     def _handle_cargo_transfer(self, data: dict) -> dict | None:
-        """
-        Handle a CargoTransfer journal event (fleet carrier ↔ ship transfers).
-
-        The game emits CargoTransfer when the player moves goods between the
-        ship hold and a fleet carrier's hold or tritium reserve.  A Cargo
-        snapshot with no Inventory (only Count) typically follows; we cannot
-        rely on it for reconciliation so all tally/limpet changes are made
-        here.
-
-        Note: the journal writes Direction in lowercase ("tocarrier" /
-        "toship"), so we normalise to lowercase before comparing.
-        """
         transfers = data.get("Transfers", [])
         if not isinstance(transfers, list) or not transfers:
             return None
@@ -578,102 +637,49 @@ class MiningRole(BaseRole):
         for t in transfers:
             if not isinstance(t, dict):
                 continue
-            raw_name = t.get("Type_Localised") or t.get("Type", "")
-            # Direction is lowercase in the actual journal ("tocarrier" / "toship").
+            # Type in CargoTransfer is plain lowercase (no $ wrapper)
+            internal  = str(t.get("Type", "")).strip().lower()
+            localised = t.get("Type_Localised") or self._name_map.get(internal) or internal
             direction = str(t.get("Direction", "")).lower()
             try:
                 count = int(t.get("Count", 0))
             except (TypeError, ValueError):
                 count = 0
             count = max(count, 0)
-            if not raw_name or count == 0:
+            if not internal or count == 0:
                 continue
 
-            name_lower = raw_name.strip().lower()
-            is_limpet = "limpet" in name_lower or name_lower == "drones"
+            if internal:
+                self._name_map[internal] = localised
 
+            is_limpet = "limpet" in internal or internal == "drones"
             if is_limpet:
                 if direction == "tocarrier":
                     self._available_limpets = max(0, self._available_limpets - count)
                 elif direction == "toship":
                     self._available_limpets += count
                 changed = True
-            else:
-                # Only touch materials we already track as refined.
-                tracked_name = self._find_tracked_name(raw_name)
-                if tracked_name is not None:
-                    if direction == "tocarrier":
-                        new_count = max(0, self._cargo_tally.get(tracked_name, 0) - count)
-                        if new_count == 0:
-                            self._cargo_tally.pop(tracked_name, None)
-                        else:
-                            self._cargo_tally[tracked_name] = new_count
-                        changed = True
-                    # "toship" for refined materials is not handled here:
-                    # those are carrier stock of unknown origin, and the
-                    # subsequent Cargo snapshot is the ground truth.
+            elif internal in self._cargo_tally:
+                if direction == "tocarrier":
+                    new_count = max(0, self._cargo_tally.get(internal, 0) - count)
+                    if new_count == 0:
+                        self._cargo_tally.pop(internal, None)
+                    else:
+                        self._cargo_tally[internal] = new_count
+                    changed = True
 
         if changed:
             self._save_state()
 
         return {
-            "event": "CargoTransfer",
+            "event":               "CargoTransfer",
             "refined_cargo_tally": dict(self._cargo_tally),
-            "available_limpets": self._available_limpets,
+            "available_limpets":   self._available_limpets,
+            "name_map":            dict(self._name_map),
         }
 
-    def _find_tracked_name(self, name: str) -> str | None:
-        """Return the `_tracked_refined` display-name key that matches *name*.
-
-        Tries in order:
-        1. Look up *name* as an internal (non-localised) key in ``_name_map``
-           (e.g. "lowtemperaturediamond" → "Low Temperature Diamonds").
-        2. Direct case-insensitive comparison against tracked display names.
-        Returns None if no match is found.
-        """
-        name_lower = name.strip().lower()
-        # Map-based resolution first (handles internal names with no spaces).
-        display = self._name_map.get(name_lower)
-        if display and display in self._tracked_refined:
-            return display
-        # Fallback: direct case-insensitive match on display names.
-        for tracked in self._tracked_refined:
-            if tracked.lower() == name_lower:
-                return tracked
-        return None
-
-    def _lookup_in_inv(self, display_name: str, inv_map_ci: dict[str, int]) -> int:
-        """Look up a tracked display name in a case-insensitive inventory map.
-
-        Tries the display name directly, then falls back to any known internal
-        name so that entries missing ``Name_Localised`` (keyed by their
-        lowercase internal name, e.g. "lowtemperaturediamond") are still found.
-        """
-        # Direct case-insensitive hit.
-        count = inv_map_ci.get(display_name.lower(), 0)
-        if count:
-            return count
-        # Fallback: find the internal name for this display name and try it.
-        for internal, display in self._name_map.items():
-            if display == display_name:
-                count = inv_map_ci.get(internal, 0)
-                if count:
-                    return count
-        return 0
-
     def _handle_carrier_deposit_fuel(self, data: dict) -> dict | None:
-        """
-        Handle a CarrierDepositFuel journal event.
-
-        Fired when the player deposits Tritium from their ship cargo into
-        the fleet carrier's fuel reserve.  The commodity is always Tritium;
-        the journal field ``Amount`` is how many tonnes were deducted from
-        the ship.
-
-        Example:
-            { "event":"CarrierDepositFuel", "CarrierID":3710914304,
-              "Amount":66, "Total":1000 }
-        """
+        """Tritium deposited into fleet carrier fuel reserve."""
         try:
             amount = int(data.get("Amount", 0))
         except (TypeError, ValueError):
@@ -681,44 +687,39 @@ class MiningRole(BaseRole):
         if amount <= 0:
             return None
 
-        # The fuel commodity is always Tritium — find it in the tally using
-        # the same case-insensitive / name-map resolution as CargoTransfer.
-        tracked_name = self._find_tracked_name("tritium")
-        if tracked_name is not None:
-            new_count = max(0, self._cargo_tally.get(tracked_name, 0) - amount)
+        if "tritium" in self._cargo_tally:
+            new_count = max(0, self._cargo_tally["tritium"] - amount)
             if new_count == 0:
-                self._cargo_tally.pop(tracked_name, None)
+                self._cargo_tally.pop("tritium", None)
             else:
-                self._cargo_tally[tracked_name] = new_count
+                self._cargo_tally["tritium"] = new_count
             self._save_state()
 
         return {
-            "event": "CarrierDepositFuel",
-            "amount": amount,
+            "event":               "CarrierDepositFuel",
+            "amount":              amount,
             "refined_cargo_tally": dict(self._cargo_tally),
-            "available_limpets": self._available_limpets,
+            "available_limpets":   self._available_limpets,
+            "name_map":            dict(self._name_map),
         }
 
     def _handle_docked(self, data: dict) -> dict:
         self._last_asteroid = {
             "materials": [],
-            "content": "",
-            "motherlode": "",
+            "content":   "",
             "remaining": 1.0,
         }
-        # Refined-cargo tally and available limpets are intentionally NOT reset
-        # here — they remain valid until actual cargo changes (sell, transfer to
-        # fleet carrier or tritium reserve) are reflected back via Cargo events.
-        self._n_cracked = 0
-        self._n_collectors = 0
+        self._n_cracked     = 0
+        self._n_collectors  = 0
         self._n_prospectors = 0
         self._save_state()
         return {
-            "event": "Docked",
-            "station": data.get("StationName", ""),
-            "system": data.get("StarSystem", ""),
+            "event":               "Docked",
+            "station":             data.get("StationName", ""),
+            "system":              data.get("StarSystem", ""),
             "refined_cargo_tally": dict(self._cargo_tally),
-            "available_limpets": self._available_limpets,
+            "available_limpets":   self._available_limpets,
+            "name_map":            dict(self._name_map),
         }
 
     def _handle_buy_drones(self, data: dict) -> dict:
@@ -727,16 +728,15 @@ class MiningRole(BaseRole):
         except (TypeError, ValueError):
             amount = 0
         amount = max(amount, 0)
-
         if amount:
             self._available_limpets += amount
             self._last_status["cargo"] = float(self._last_status.get("cargo", 0.0)) + float(amount)
             self._save_state()
         return {
-            "event": "BuyDrones",
-            "count": amount,
+            "event":             "BuyDrones",
+            "count":             amount,
             "available_limpets": self._available_limpets,
-            "cargo": float(self._last_status.get("cargo", 0.0)),
+            "cargo":             float(self._last_status.get("cargo", 0.0)),
         }
 
     def _handle_sell_drones(self, data: dict) -> dict:
@@ -745,7 +745,6 @@ class MiningRole(BaseRole):
         except (TypeError, ValueError):
             amount = 0
         amount = max(amount, 0)
-
         if amount:
             self._available_limpets = max(0, self._available_limpets - amount)
             self._last_status["cargo"] = max(
@@ -754,22 +753,13 @@ class MiningRole(BaseRole):
             )
             self._save_state()
         return {
-            "event": "SellDrones",
-            "count": amount,
+            "event":             "SellDrones",
+            "count":             amount,
             "available_limpets": self._available_limpets,
-            "cargo": float(self._last_status.get("cargo", 0.0)),
+            "cargo":             float(self._last_status.get("cargo", 0.0)),
         }
 
     def _handle_eject_cargo(self, data: dict) -> dict | None:
-        """
-        Handle an EjectCargo journal event.
-
-        ``Type`` "drones" (case-insensitive, partial match) → decrease
-        available limpets by ``Count``.
-        Any other ``Type`` → remove ``Count`` units from the refined-cargo
-        tally (no-op if the commodity is not currently tracked).
-        In both cases the running cargo-used figure is reduced by ``Count``.
-        """
         try:
             count = int(data.get("Count", 0))
         except (TypeError, ValueError):
@@ -777,19 +767,18 @@ class MiningRole(BaseRole):
         if count <= 0:
             return None
 
-        raw_type   = str(data.get("Type", "")).strip()
-        type_lower = raw_type.lower()
+        raw_type = str(data.get("Type", "")).strip()
+        # Type in EjectCargo may carry the "$..._name;" wrapper
+        internal = self._strip_journal_key(raw_type)
 
-        if "drone" in type_lower:
+        if "drone" in internal or internal == "drones":
             self._available_limpets = max(0, self._available_limpets - count)
-        else:
-            tracked_name = self._find_tracked_name(raw_type)
-            if tracked_name is not None:
-                new_count = max(0, self._cargo_tally.get(tracked_name, 0) - count)
-                if new_count == 0:
-                    self._cargo_tally.pop(tracked_name, None)
-                else:
-                    self._cargo_tally[tracked_name] = new_count
+        elif internal in self._cargo_tally:
+            new_count = max(0, self._cargo_tally.get(internal, 0) - count)
+            if new_count == 0:
+                self._cargo_tally.pop(internal, None)
+            else:
+                self._cargo_tally[internal] = new_count
 
         self._last_status["cargo"] = max(
             0.0,
@@ -797,25 +786,26 @@ class MiningRole(BaseRole):
         )
         self._save_state()
         log.info(
-            "MiningRole: EjectCargo — type=%r count=%d  limpets=%d",
-            raw_type, count, self._available_limpets,
+            "MiningRole: EjectCargo — internal=%r count=%d limpets=%d",
+            internal, count, self._available_limpets,
         )
         return {
             "event":               "EjectCargo",
             "refined_cargo_tally": dict(self._cargo_tally),
             "available_limpets":   self._available_limpets,
             "cargo":               float(self._last_status.get("cargo", 0.0)),
+            "name_map":            dict(self._name_map),
         }
+
+    # ── Helpers ────────────────────────────────────────────────────────────
 
     @staticmethod
     def _strip_journal_key(raw: str) -> str:
         """Normalise a journal localisation key to its plain commodity name.
 
-        The ED journal sometimes wraps internal names in a localisation key
-        format: ``$lowtemperaturediamond_name;`` or ``$tritium_name;``.
-        This strips the ``$`` prefix and any ``_name;`` / ``_name_plural;``
-        suffix so the result matches what ``CargoTransfer`` sends (e.g.
-        ``"lowtemperaturediamond"``, ``"tritium"``).
+        Strips the ``$`` prefix and ``_name;`` / ``_name_plural;`` suffix so
+        that e.g. ``"$lowtemperaturediamond_name;"`` → ``"lowtemperaturediamond"``.
+        If ``raw`` has no wrapper the string is returned lowercased as-is.
         """
         s = raw.strip().lower()
         if s.startswith("$"):

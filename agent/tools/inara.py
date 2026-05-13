@@ -24,8 +24,8 @@ Cache file format
   {
     "fetched_at": "<ISO 8601 UTC timestamp>",
     "prices": {
-      "Painite":                  {"avg_sell": 57524,  "max_sell": 402344},
-      "Low Temperature Diamonds": {"avg_sell": 129388, "max_sell": 647653},
+      "painite":                {"avg_sell": 57524,  "max_sell": 402344},
+      "lowtemperaturediamond":  {"avg_sell": 129388, "max_sell": 647653},
       ...
     }
   }
@@ -33,11 +33,14 @@ Cache file format
 Returned structure (from fetch_commodity_prices)
 -------------------------------------------------
   {
-    "Painite":                  {"avg_sell": 57524,  "max_sell": 402344},
-    "Low Temperature Diamonds": {"avg_sell": 129388, "max_sell": 647653},
+    "painite":               {"avg_sell": 57524,  "max_sell": 402344},
+    "lowtemperaturediamond": {"avg_sell": 129388, "max_sell": 647653},
     ...
   }
-  Keys are the localised display names used in MiningRefined journal events.
+  Keys are the lowercase internal commodity names as returned by the Ardent
+  API (commodityName field) and used in ED journal Name/Type fields.
+  These match the ProspectedAsteroid Materials[].Name field directly, so no
+  display-name mapping or normalisation is required on the caller side.
 """
 from __future__ import annotations
 
@@ -64,27 +67,6 @@ _BUNDLED_PRICES_PATH = Path(__file__).parent.parent / "data" / "mining_commodity
 _HEADERS = {
     "User-Agent": "ED-Cockpit/1.0 (Commodity Price Cache)",
     "Accept":     "application/json",
-}
-
-# ── Internal-name → display-name mapping ──────────────────────────────────────
-# The Ardent API uses lowercase journal internal names (e.g. "lowtemperaturediamond").
-# The panel and cargo tally use localised display names ("Low Temperature Diamonds").
-# This mapping covers all common mining commodities and the most traded metals.
-# Maps Ardent API internal names (lowercase, no spaces) to the localised
-# display names used by MiningRefined journal events.
-#
-# Only entries where the display name CANNOT be derived by stripping spaces
-# and normalising case belong here.  For example "bertrandite" → "Bertrandite"
-# does NOT need an entry because the client panel's tier-2 normalised lookup
-# handles it automatically.  Entries below cover cases where the internal name
-# is a genuinely different word from the display name (e.g. "opal" → "Void Opal")
-# or where pluralisation makes the names diverge after normalisation.
-_INTERNAL_TO_DISPLAY: dict[str, str] = {
-    # Internal name differs from display name (different word / truncated)
-    "opal":                          "Void Opal",
-    "lowtemperaturediamond":         "Low Temperature Diamonds",
-    # Commodity names whose internal form omits a significant word
-    "methanolmonohydratecrystals":   "Methanol Monohydrate Crystals",
 }
 
 # ── In-memory layer (process-lifetime cache) ───────────────────────────────────
@@ -237,14 +219,9 @@ def _fetch_ardent() -> dict[str, dict]:
         except (TypeError, ValueError):
             continue
 
-        # Store under internal name so the mining role's _name_map lookups work.
+        # Store under the internal (lowercase) name — the same key used in
+        # ProspectedAsteroid Materials[].Name and MiningRefined.Type fields.
         prices[internal] = entry
-
-        # Also store under the localised display name so the client panel can
-        # look up by the string it receives from MiningRefined events.
-        display = _INTERNAL_TO_DISPLAY.get(internal)
-        if display:
-            prices[display] = entry
 
     return prices
 
