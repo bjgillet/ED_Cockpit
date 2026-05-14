@@ -6,7 +6,7 @@
    version="1.1"
    id="svg60"
    sodipodi:docname="banner.svg"
-   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -20,13 +20,13 @@
      inkscape:pageopacity="0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
-     inkscape:zoom="6.0088363"
-     inkscape:cx="96.10846"
-     inkscape:cy="188.55564"
+     inkscape:zoom="1.5022091"
+     inkscape:cx="444.67845"
+     inkscape:cy="96.857356"
      inkscape:window-width="1920"
-     inkscape:window-height="975"
-     inkscape:window-x="0"
-     inkscape:window-y="1112"
+     inkscape:window-height="1009"
+     inkscape:window-x="1912"
+     inkscape:window-y="-8"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg60" />
   <defs
@@ -137,10 +137,10 @@
     </filter>
     <filter
        id="textGlow"
-       x="-0.014207029"
-       y="-0.23263915"
-       width="1.0284141"
-       height="1.4652783">
+       x="-0.014177131"
+       y="-0.25402075"
+       width="1.0283543"
+       height="1.5080415">
       <feGaussianBlur
          stdDeviation="2.5"
          result="blur"
@@ -157,10 +157,10 @@
     </filter>
     <filter
        id="subtleGlow"
-       x="-0.018027816"
-       y="-0.18943474"
-       width="1.0360556"
-       height="1.3788695">
+       x="-0.018037696"
+       y="-0.20684547"
+       width="1.0360754"
+       height="1.4136909">
       <feGaussianBlur
          stdDeviation="1.5"
          result="blur"
@@ -690,7 +690,7 @@
      text-anchor="end"
      fill="#00d4ff"
      fill-opacity="0.5"
-     id="text59">ED COCKPIT v0.1</text>
+     id="text59">ED COCKPIT</text>
   <!-- Bottom-left callsign -->
   <text
      x="18"
@@ -702,14 +702,4 @@
      fill="#ff8c00"
      fill-opacity="0.5"
      id="text60" />
-  <text
-     xml:space="preserve"
-     style="font-size:13.3333px;line-height:1.25;font-family:sans-serif;text-align:center;letter-spacing:0px;word-spacing:0px;text-anchor:middle;fill:#ececec"
-     x="102.84853"
-     y="186.89143"
-     id="text61"><tspan
-       sodipodi:role="line"
-       id="tspan60"
-       x="102.84853"
-       y="186.89143">SparcT1</tspan></text>
 </svg>
